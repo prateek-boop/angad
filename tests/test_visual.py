@@ -11,10 +11,9 @@ from ml_engine.fetch.ssrf_guard import SSRFBlocked
 from ml_engine.visual import perceptual_hash, screenshotter
 from ml_engine.visual.reference_store import ReferenceStore, ReferenceStoreError
 
-
 try:
-    from PIL import Image, ImageDraw
     import imagehash as _imagehash  # noqa: F401
+    from PIL import Image, ImageDraw
 except ImportError:
     Image = ImageDraw = None
 

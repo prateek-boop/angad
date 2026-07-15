@@ -13,7 +13,6 @@ from ml_engine.fetch.http_client import (
 )
 from ml_engine.fetch.ssrf_guard import SSRFBlocked, ValidatedURL, validate_url
 
-
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 

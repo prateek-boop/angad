@@ -17,7 +17,7 @@ class InvalidURL(ValueError):
     pass
 
 
-def validate_url(url: str, *, network: bool = False) -> str:
+def validate_url_format(url: str, *, network: bool = False) -> str:
     if not isinstance(url, str):
         raise InvalidURL("URL must be a string")
     value = url.strip()

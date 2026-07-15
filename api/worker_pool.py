@@ -1,8 +1,13 @@
 """Bounded daemon worker pool for blocking model and network operations.
 
-The pool is deliberately small: Keras inference is serialized by its model
-wrapper while network evidence can use the remaining workers. Daemon workers
-do not make interpreter shutdown depend on asyncio's default executor.
+Keras inference is already serialized by ``ThreatDetectionModel``'s own lock
+(see ml_engine/model.py), so this pool does not need ``workers=1`` to keep TF
+safe — that would just re-serialize everything behind a second, redundant
+bottleneck. Sizing it for real concurrency lets Tier 1-4 network evidence
+(reputation/redirect/HTML/visual fetches, each up to several seconds) run in
+parallel with each other and with the (internally serialized) model call.
+Daemon workers do not make interpreter shutdown depend on asyncio's default
+executor.
 """
 
 from __future__ import annotations
@@ -11,6 +16,8 @@ import asyncio
 import queue
 import threading
 from collections.abc import Callable
+
+import config
 
 
 class WorkerPoolBusy(RuntimeError):
@@ -43,7 +50,7 @@ class DaemonWorkerPool:
 
     def _worker(self) -> None:
         while True:
-            result_queue, function, args, kwargs = self._queue.get()
+            callback, function, args, kwargs = self._queue.get()
             result = None
             error = None
             try:
@@ -52,26 +59,31 @@ class DaemonWorkerPool:
                 error = exc
             finally:
                 self._queue.task_done()
-            result_queue.put((result, error))
+            callback(result, error)
 
     async def run(self, function: Callable, *args, **kwargs):
         self._ensure_started()
-        result_queue: queue.Queue = queue.Queue(maxsize=1)
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+
+        def deliver(result, error) -> None:
+            def _set() -> None:
+                if future.done():
+                    return
+                if error is not None:
+                    future.set_exception(error)
+                else:
+                    future.set_result(result)
+
+            loop.call_soon_threadsafe(_set)
+
         try:
-            self._queue.put_nowait((result_queue, function, args, kwargs))
+            self._queue.put_nowait((deliver, function, args, kwargs))
         except queue.Full as exc:
             raise WorkerPoolBusy("ShieldNet worker queue is full") from exc
-        while True:
-            try:
-                result, error = result_queue.get_nowait()
-                if error is not None:
-                    raise error
-                return result
-            except queue.Empty:
-                await asyncio.sleep(0.002)
+        return await future
 
 
-# TensorFlow 2.21's CPU runtime is stable when one initialized model is served
-# from one worker thread. Scale API throughput with multiple worker processes;
-# each process keeps its own model and bounded queue.
-worker_pool = DaemonWorkerPool(workers=1)
+# Scale API throughput horizontally too (multiple worker processes/replicas);
+# each process keeps its own model and its own bounded queue.
+worker_pool = DaemonWorkerPool(workers=config.API_WORKER_POOL_SIZE)

@@ -20,8 +20,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 import tldextract
@@ -132,7 +132,7 @@ def _default_tls_connect(
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_datetime(value: object) -> datetime | None:
@@ -144,8 +144,8 @@ def _parse_datetime(value: object) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _parse_rdap_registration_age_days(
@@ -229,7 +229,7 @@ def _parse_tls_age_days(cert: dict, now: datetime | None = None) -> float | None
         return None
     try:
         issued = datetime.fromtimestamp(
-            ssl.cert_time_to_seconds(not_before), timezone.utc
+            ssl.cert_time_to_seconds(not_before), UTC
         )
     except (TypeError, ValueError, OverflowError):
         return None
@@ -242,7 +242,7 @@ def _parse_tls_expiry_days(cert: dict, now: datetime | None = None) -> float | N
         return None
     try:
         expires = datetime.fromtimestamp(
-            ssl.cert_time_to_seconds(not_after), timezone.utc
+            ssl.cert_time_to_seconds(not_after), UTC
         )
     except (TypeError, ValueError, OverflowError):
         return None

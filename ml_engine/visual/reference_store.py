@@ -11,7 +11,6 @@ from typing import Any
 import config
 from ml_engine.visual.perceptual_hash import hash_distance, parse_hash, serialize_hash
 
-
 STORE_PATH = os.path.join(config.DATA_DIR, "visual_reference_store.json")
 MAX_STORE_BYTES = 1 * 1024 * 1024
 _DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -70,7 +69,7 @@ class ReferenceStore:
                 raise ReferenceStoreError(
                     "visual reference store exceeds its size limit"
                 )
-            with open(self.path, "r", encoding="utf-8") as handle:
+            with open(self.path, encoding="utf-8") as handle:
                 raw_entries = json.load(handle)
         except ReferenceStoreError:
             raise

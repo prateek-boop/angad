@@ -54,7 +54,7 @@ class TemperatureCalibrator:
         exp_logits = np.exp(scaled_logits)
         return exp_logits / exp_logits.sum(axis=1, keepdims=True)
 
-    def fit(self, probabilities, labels) -> "TemperatureCalibrator":
+    def fit(self, probabilities, labels) -> TemperatureCalibrator:
         matrix = _as_probability_matrix(probabilities)
         y = np.asarray(labels, dtype=np.int64)
         if y.ndim != 1 or len(y) != len(matrix):
@@ -115,11 +115,11 @@ class TemperatureCalibrator:
             raise
 
     @classmethod
-    def load(cls, path: str | None = None) -> "TemperatureCalibrator":
+    def load(cls, path: str | None = None) -> TemperatureCalibrator:
         path = path or config.CALIBRATION_PATH
         if not os.path.exists(path):
             return cls()
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             payload = json.load(handle)
         if payload.get("schema_version") != _SCHEMA_VERSION:
             raise ValueError("unsupported calibration artifact schema")

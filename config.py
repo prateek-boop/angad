@@ -102,6 +102,7 @@ DRIFT_CHECK_WINDOW = 200
 DRIFT_KS_ALPHA = 0.01  # significance threshold for ks_2samp drift alarms
 DRIFT_KS_MIN_STATISTIC = 0.2
 DRIFT_JS_THRESHOLD = 0.15
+DRIFT_CLASS_SMOOTHING = 1e-6  # Laplace smoothing before normalizing class counts
 DRIFT_RISK_SHIFT_THRESHOLD = 0.15
 DRIFT_MAX_ROWS = _env_int("SHIELDNET_DRIFT_MAX_ROWS", 50_000)
 WEBHOOK_THREAT_LEVEL_THRESHOLD = "high"
@@ -118,6 +119,11 @@ THREAT_LEVEL_THRESHOLDS = {
     "medium": 0.3,
     "low": 0.0,
 }
+
+# Model inference is already serialized by ThreatDetectionModel's own lock, so
+# this can be sized for real network concurrency (Tier 1-4 fetches) rather
+# than pinned to 1. Bump per-process if a single process is fetch-bound.
+API_WORKER_POOL_SIZE = _env_int("SHIELDNET_API_WORKER_POOL_SIZE", 8)
 
 RATE_LIMIT_REQUESTS_PER_MIN = 30
 MAX_BATCH_SIZE = _env_int("SHIELDNET_MAX_BATCH_SIZE", 50)

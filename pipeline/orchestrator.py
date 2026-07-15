@@ -19,8 +19,7 @@ from ml_engine.tier5.drift import DriftMonitor
 from ml_engine.tier5.ensemble import EvidenceEnsemble
 from ml_engine.tier5.feedback import FeedbackStore, redact_url
 from ml_engine.url_tokenizer import URLTokenizer
-from pipeline.validation import registered_domain, validate_url
-
+from pipeline.validation import registered_domain, validate_url_format
 
 DEPTH_ORDER = {"tier0": 0, "tier1": 1, "tier2": 2, "tier3": 3, "tier4": 4}
 
@@ -169,7 +168,7 @@ class ScanOrchestrator:
     ) -> dict:
         if depth not in DEPTH_ORDER:
             raise ValueError(f"unsupported scan depth: {depth}")
-        value = validate_url(url)
+        value = validate_url_format(url)
         selected_timeout_ms = timeout_ms or config.DEFAULT_SCAN_TIMEOUT_MS
         if (
             selected_timeout_ms < 100
@@ -363,9 +362,11 @@ class ScanOrchestrator:
 
         evidence_reasons = [item.reason for item in fused.contributions]
         model_reasons = self.explainer.explain(features, category)
-        if evidence_reasons and model_reasons == [
-            "No suspicious URL patterns detected."
-        ]:
+        if evidence_reasons and not self.explainer.has_specific_reasons(features):
+            # Drop the generic heuristic filler (either the "safe" or the
+            # "no dominant heuristic" variant) whenever real ensemble evidence
+            # already explains the decision — it's noise, not signal, next to
+            # a concrete reason.
             model_reasons = []
         reasons = list(dict.fromkeys(evidence_reasons + model_reasons))[:12]
         if not reasons:
@@ -382,7 +383,10 @@ class ScanOrchestrator:
         if fused.policy_blocked:
             recommendation = "Do not access this target; it violated the live-analysis network policy."
         elif decision == "review":
-            recommendation = "Treat this URL as unverified and obtain deeper evidence or analyst review before proceeding."
+            recommendation = (
+                "Treat this URL as unverified and obtain deeper evidence or "
+                "analyst review before proceeding."
+            )
         else:
             recommendation = self.explainer.recommendation(category)
         result = {

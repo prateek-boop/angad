@@ -2,15 +2,24 @@
 deployment paths that don't want a full TensorFlow/Keras load. See
 MODEL_BRAIN.md sec 11."""
 
-import numpy as np
-import tensorflow as tf
+import json
 import os
 import threading
 
+import numpy as np
+import tensorflow as tf
+
 import config
 from ml_engine.feature_extractor import FeatureExtractor
-from ml_engine.url_tokenizer import URLTokenizer
+from ml_engine.quantize_model import calibration_snapshot_path
 from ml_engine.tier5.calibration import TemperatureCalibrator
+from ml_engine.url_tokenizer import URLTokenizer
+
+_TEMPERATURE_TOLERANCE = 1e-9
+
+
+class CalibrationDriftError(RuntimeError):
+    """The tflite export and the live calibration artifact disagree."""
 
 
 class QuantizedThreatDetector:
@@ -26,7 +35,24 @@ class QuantizedThreatDetector:
         self.tokenizer = URLTokenizer()
         self.extractor = FeatureExtractor()
         self.calibrator = TemperatureCalibrator.load(config.CALIBRATION_PATH)
+        self._verify_calibration_consistency(tflite_path)
         self._lock = threading.Lock()
+
+    def _verify_calibration_consistency(self, tflite_path: str) -> None:
+        snapshot_path = calibration_snapshot_path(tflite_path)
+        if not os.path.isfile(snapshot_path):
+            return
+        with open(snapshot_path, encoding="utf-8") as f:
+            snapshot = json.load(f)
+        exported_temperature = float(snapshot.get("temperature", 1.0))
+        if abs(exported_temperature - self.calibrator.temperature) > _TEMPERATURE_TOLERANCE:
+            raise CalibrationDriftError(
+                "quantized model and calibration artifact are out of sync: "
+                f"tflite was exported with temperature={exported_temperature}, "
+                f"current calibration.json has temperature={self.calibrator.temperature}. "
+                "Rerun `shieldnet quantize` after retraining, or restore the "
+                "matching calibration.json."
+            )
 
     def predict(self, url: str) -> dict:
         url_ids = self.tokenizer.encode_batch([url])

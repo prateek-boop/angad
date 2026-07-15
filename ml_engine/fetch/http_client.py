@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import socket
 import time
-from typing import Iterator
+from collections.abc import Iterator
 
 import requests
 import urllib3
@@ -13,7 +12,6 @@ from urllib3.util import Timeout
 
 import config
 from ml_engine.fetch.ssrf_guard import ValidatedURL
-
 
 USER_AGENT = "ShieldNet/0.2 (+security-research)"
 REQUEST_HEADERS = {
@@ -97,7 +95,7 @@ def _pinned_request(validated: ValidatedURL, timeout_s: float) -> PinnedResponse
                 timeout=_timeout_for(remaining),
             )
             return PinnedResponse(response, pool)
-        except (urllib3.exceptions.HTTPError, OSError, socket.error) as exc:
+        except (urllib3.exceptions.HTTPError, OSError) as exc:
             failures.append(f"{ip}: {exc}")
             if pool is not None:
                 pool.close()

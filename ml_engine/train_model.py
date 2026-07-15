@@ -1,5 +1,9 @@
-"""Training pipeline. See MODEL_BRAIN.md sec 7: load/generate URLs -> tokenize
--> extract features -> label -> stratified split -> train -> evaluate -> save."""
+"""Training pipeline. See MODEL_BRAIN.md sec 7: load real URLs -> tokenize
+-> extract features -> label -> stratified split -> train -> evaluate -> save.
+
+This pipeline is real-data-only. There is no synthetic URL generator: every
+training example must come from a real threat feed, a real safe-domain list,
+or a locally supplied labeled CSV (see ``--local-csv``)."""
 
 import json
 import os
@@ -13,15 +17,18 @@ from sklearn.metrics import (
     f1_score,
     log_loss,
 )
-from sklearn.utils.class_weight import compute_class_weight
 from sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight
 
 import config
-from ml_engine.dataset_generator import generate_dataset
 from ml_engine.feature_extractor import FeatureExtractor
 from ml_engine.model import ThreatDetectionModel, build_model
-from ml_engine.url_tokenizer import URLTokenizer
+from ml_engine.real_data_loader import load_real_dataset
 from ml_engine.tier5.calibration import TemperatureCalibrator
+from ml_engine.tier5.feedback import FeedbackStore
+from ml_engine.url_tokenizer import URLTokenizer
+
+_DEFAULT_FEED_NAMES = ["urlhaus", "openphish", "tranco"]
 
 
 def _deduplicate(urls: list[str], labels: list[str]) -> tuple[list[str], list[str]]:
@@ -75,34 +82,72 @@ def _prepare_arrays(urls: list[str], labels: list[str]):
     return url_ids, features, y
 
 
-def load_dataset(mode: str, n_samples: int):
-    if mode == "synthetic":
-        return generate_dataset(n_samples, seed=42)
-    if mode in ("real", "combined"):
-        from ml_engine.real_data_loader import load_real_dataset
+def load_dataset(
+    feed_names: list[str] | None = None,
+    *,
+    local_csv: list[str] | None = None,
+    phishtank_csv: str | None = None,
+    include_feedback: bool = False,
+    strict: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Assemble a real-data training set: free threat feeds + optional local CSVs.
 
-        real_urls, real_labels = load_real_dataset()
-        if mode == "real":
-            return real_urls, real_labels
-        synth_urls, synth_labels = generate_dataset(n_samples, seed=42)
-        return synth_urls + real_urls, synth_labels + real_labels
-    raise ValueError(f"unknown dataset mode: {mode}")
+    ``urlhaus``/``openphish``/``tranco`` cover malware/phishing/safe automatically.
+    Nothing free covers ``data_leak`` or ``scam`` in real time, so those classes
+    (and any extra coverage) must come from ``local_csv`` (e.g. a labeled Kaggle
+    export with ``url``/``label`` columns) or a manually downloaded PhishTank
+    export passed as ``phishtank_csv``.
+    """
+    names = list(feed_names) if feed_names is not None else list(_DEFAULT_FEED_NAMES)
+    sources = {}
+    if phishtank_csv:
+        sources["phishtank"] = phishtank_csv
+        if "phishtank" not in names:
+            names.append("phishtank")
+
+    urls, labels = load_real_dataset(
+        feed_names=names,
+        sources=sources,
+        local_sources=local_csv,
+        strict=strict,
+    )
+    if include_feedback:
+        reviewed = FeedbackStore().export_labeled_corrections()
+        if reviewed:
+            extra_urls, extra_labels = zip(*reviewed)
+            urls = list(urls) + list(extra_urls)
+            labels = list(labels) + list(extra_labels)
+    return list(urls), list(labels)
 
 
 def train(
-    dataset_mode: str = "synthetic", n_samples: int = 5000, epochs: int | None = None
+    feed_names: list[str] | None = None,
+    local_csv: list[str] | None = None,
+    phishtank_csv: str | None = None,
+    include_feedback: bool = False,
+    epochs: int | None = None,
+    strict: bool = False,
 ):
     epochs = epochs or config.TRAIN_CONFIG["epochs"]
 
     np.random.seed(42)
     tf.keras.utils.set_random_seed(42)
 
-    urls, labels = load_dataset(dataset_mode, n_samples)
+    urls, labels = load_dataset(
+        feed_names,
+        local_csv=local_csv,
+        phishtank_csv=phishtank_csv,
+        include_feedback=include_feedback,
+        strict=strict,
+    )
     urls, labels = _deduplicate(urls, labels)
     class_counts = {name: labels.count(name) for name in config.THREAT_CLASSES}
     if min(class_counts.values(), default=0) < 3:
         raise ValueError(
-            f"each class needs at least three samples after deduplication: {class_counts}"
+            "each class needs at least three samples after deduplication: "
+            f"{class_counts}. Free feeds only cover safe/phishing/malware — "
+            "supply --local-csv for data_leak/scam (and any other underfilled "
+            "class) with a labeled url,label CSV."
         )
     url_ids, features, y = _prepare_arrays(urls, labels)
 
@@ -226,7 +271,10 @@ def train(
         "n_train": len(idx_train),
         "n_val": len(idx_val),
         "n_test": len(idx_test),
-        "dataset_mode": dataset_mode,
+        "feed_names": list(feed_names) if feed_names is not None else list(_DEFAULT_FEED_NAMES),
+        "local_csv_count": len(local_csv or []),
+        "used_phishtank_csv": bool(phishtank_csv),
+        "included_feedback": include_feedback,
         "epochs_run": len(history.history["loss"]),
     }
     with open(config.METRICS_PATH, "w") as f:
@@ -249,10 +297,20 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset", choices=["synthetic", "real", "combined"], default="synthetic"
+        "--feeds", nargs="+", choices=["urlhaus", "openphish", "tranco"], default=None
     )
-    parser.add_argument("--samples", type=int, default=5000)
+    parser.add_argument("--local-csv", nargs="+", default=None)
+    parser.add_argument("--phishtank-csv", default=None)
+    parser.add_argument("--include-feedback", action="store_true")
+    parser.add_argument("--strict", action="store_true")
     parser.add_argument("--epochs", type=int, default=None)
     args = parser.parse_args()
 
-    train(dataset_mode=args.dataset, n_samples=args.samples, epochs=args.epochs)
+    train(
+        feed_names=args.feeds,
+        local_csv=args.local_csv,
+        phishtank_csv=args.phishtank_csv,
+        include_feedback=args.include_feedback,
+        epochs=args.epochs,
+        strict=args.strict,
+    )

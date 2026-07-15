@@ -1,10 +1,9 @@
-from datetime import datetime, timezone
 import time
+from datetime import UTC, datetime
 
 from ml_engine.reputation import ReputationChecker
 
-
-NOW = datetime(2026, 7, 15, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 15, tzinfo=UTC)
 PUBLIC_DNS = [(2, 1, 6, "", ("93.184.216.34", 0))]
 CERT = {
     "issuer": ((("organizationName", "Example CA"),),),

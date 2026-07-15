@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from html.parser import HTMLParser
 import ipaddress
 import re
+from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
 import tldextract
 
 from ml_engine.brands import KNOWN_BRANDS
-
 
 _MAX_REFERENCES = 4096
 _MAX_TITLE_CHARS = 512

@@ -11,7 +11,6 @@ from ml_engine.fetch.ssrf_guard import (
     validate_url,
 )
 
-
 PUBLIC_V4 = "8.8.8.8"
 PUBLIC_V6 = "2606:4700:4700::1111"
 

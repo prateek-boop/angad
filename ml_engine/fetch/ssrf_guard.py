@@ -7,16 +7,15 @@ resolving the hostname a second time. Redirect targets require a fresh call.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ipaddress
 import queue
 import re
 import socket
 import threading
+from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import config
-
 
 _MAX_URL_LENGTH = 8192
 _CONTROL_OR_SPACE_RE = re.compile(r"[\x00-\x20\x7f]")

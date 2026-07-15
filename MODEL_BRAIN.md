@@ -321,31 +321,26 @@ File:
 ml_engine/train_model.py
 ```
 
-Training pipeline:
+Training pipeline (real data only — there is no synthetic URL generator):
 
 ```text
-load or generate URLs
+load real URLs from free feeds + optional local CSVs
+-> deduplicate, reject conflicting labels
 -> tokenize URLs
 -> extract 41 features
 -> create labels
 -> stratified train/validation/test split
--> train TensorFlow model
--> evaluate
--> save Keras model and metrics
-```
-
-Supported dataset modes:
-
-```text
-synthetic
-real
-combined
+-> train TensorFlow model with class weighting
+-> evaluate + fit temperature calibration on the validation split
+-> save Keras model, calibration artifact, and metrics
 ```
 
 Command:
 
 ```bash
-python main.py train --dataset combined --samples 50000 --epochs 30
+python main.py train --epochs 30
+# data_leak/scam need a local CSV; free feeds only cover safe/phishing/malware:
+python main.py train --local-csv data/scam_and_leaks.csv --epochs 30
 ```
 
 Important training settings:
@@ -358,6 +353,8 @@ batch size: 64
 learning rate: 0.001 with cosine decay
 early stopping: validation loss
 best checkpoint: validation accuracy
+class weights: balanced, capped at 5.0
+calibration: temperature scaling fit on the validation split
 ```
 
 Saved model:
@@ -374,27 +371,8 @@ ml_engine/saved_model/best_model.keras
 
 ## 8. Data Brain
 
-The repository has two data sources.
-
-### Synthetic Data
-
-File:
-
-```text
-ml_engine/dataset_generator.py
-```
-
-This generates fake but realistic-looking URLs for:
-
-- safe
-- phishing
-- malware
-- data_leak
-- scam
-
-This is useful for bootstrapping, but a stronger model should not rely only on synthetic data.
-
-### Real Data
+There is no synthetic data source in this repository. Every training example
+comes from real feeds or a locally supplied labeled CSV.
 
 File:
 
@@ -404,13 +382,20 @@ ml_engine/real_data_loader.py
 
 Real data can come from:
 
-- URLhaus
-- OpenPhish
-- PhishTank
-- Tranco or Majestic safe-domain lists
-- local Kaggle CSV datasets
+- URLhaus (malware)
+- OpenPhish (phishing)
+- Tranco safe-domain list (safe)
+- PhishTank (phishing; manual CSV export — free API access requires registration)
+- local Kaggle-style CSV datasets (`url`, `label` columns)
 
-A stronger model should use more real, fresh, carefully labeled URLs.
+`data_leak` and `scam` have no free real-time feed. `train_model.py` raises a
+clear error naming any class with fewer than three examples after
+deduplication, so training fails loudly rather than silently training on an
+empty or synthetic-noise class — supply `--local-csv` for those classes.
+
+A stronger model should use more real, fresh, carefully labeled URLs, and a
+chronological (not random) holdout so evaluation reflects generalization to
+future campaigns rather than near-duplicate URLs from the same one.
 
 ## 9. Inference Brain
 
@@ -448,10 +433,25 @@ probabilities
 scan_time_ms
 ```
 
-The blocking decision is simple:
+Tier 0-5 add further fields to the same response (all real, not aspirational):
 
 ```text
-blocked = predicted class is not "safe"
+scan_id            unique id for this scan, used to submit feedback
+decision           "allow" | "review" | "block" (see below)
+uncertainty        normalized entropy of the fused probabilities
+depth_requested    the tier depth actually requested
+warnings           tier failures/timeouts/disabled-feature notes, non-fatal
+tier_results       per-tier status and evidence, one key per tier run
+evidence           structured list of the ensemble's evidence contributions
+```
+
+The blocking decision is not just "predicted class is not safe" — it is the
+ensemble's ``decision`` field, which also fires on a policy-level block (e.g.
+a redirect target violating the fetch policy) independent of the predicted
+class:
+
+```text
+blocked = decision == "block"
 ```
 
 ## 10. Explainability Brain
@@ -504,7 +504,9 @@ The current brain is good because:
 
 - It combines raw URL learning and engineered features.
 - It has a clear API contract.
-- It can train from synthetic and real data.
+- It trains only on real data — feeds and locally supplied labeled CSVs — so
+  the model can't learn synthetic-generator artifacts instead of real
+  attacker behavior.
 - It has a TFLite path for lightweight deployment.
 - It gives user-facing reasons through the explainer.
 - It separates preprocessing, model, training, inference, and API code cleanly.
@@ -528,9 +530,12 @@ It does not inspect:
 - downloaded file hashes
 - reputation APIs
 
-### 2. Synthetic data can make the model overconfident
+### 2. Free real feeds are unevenly distributed across classes
 
-Synthetic phishing and scam URLs may be too pattern-based. The model can learn generator artifacts instead of real attacker behavior.
+`urlhaus`/`openphish`/`tranco` cover `malware`/`phishing`/`safe` well but give
+zero coverage for `data_leak`/`scam`. Those classes depend entirely on
+whatever locally supplied CSV you provide, so their quality and volume are
+only as good as that source.
 
 ### 3. The safe class is the hardest class
 

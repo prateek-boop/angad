@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from email.message import Message
 import time
+from email.message import Message
 
 import requests
 import urllib3
@@ -15,7 +15,6 @@ from ml_engine.fetch.http_client import (
     open_response,
 )
 from ml_engine.fetch.ssrf_guard import SSRFBlocked, validate_url
-
 
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _HTML_MEDIA_TYPES = {"text/html", "application/xhtml+xml"}

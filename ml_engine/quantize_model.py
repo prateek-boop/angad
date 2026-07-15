@@ -1,18 +1,54 @@
 """Converts the trained Keras model to a dynamic-range-quantized TFLite model
 for lightweight CPU inference. See MODEL_BRAIN.md sec 11."""
 
-import numpy as np
-import tensorflow as tf
+import json
 import os
 import tempfile
 
+import numpy as np
+import tensorflow as tf
+
 import config
 from ml_engine.feature_extractor import FeatureExtractor
+from ml_engine.tier5.calibration import TemperatureCalibrator
 from ml_engine.url_tokenizer import URLTokenizer
 
 
+def calibration_snapshot_path(tflite_path: str) -> str:
+    return tflite_path + ".calibration_snapshot.json"
+
+
+def _write_calibration_snapshot(tflite_path: str, calibration_path: str) -> None:
+    """Record the calibration in effect at export time next to the tflite file.
+
+    ``QuantizedThreatDetector`` compares this against the live calibration
+    artifact at load time so a retrain that updates calibration.json without
+    re-running ``shieldnet quantize`` (or vice versa) fails loudly instead of
+    silently serving probabilities calibrated for a different model version.
+    """
+    calibrator = TemperatureCalibrator.load(calibration_path)
+    snapshot = {
+        "temperature": calibrator.temperature,
+        "fitted_samples": calibrator.fitted_samples,
+    }
+    path = calibration_snapshot_path(tflite_path)
+    directory = os.path.dirname(path) or "."
+    descriptor, temporary = tempfile.mkstemp(
+        dir=directory, prefix=".shieldnet-calib-", suffix=".json"
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def quantize(
-    keras_model_path: str = config.MODEL_PATH, out_path: str = config.TFLITE_MODEL_PATH
+    keras_model_path: str = config.MODEL_PATH,
+    out_path: str = config.TFLITE_MODEL_PATH,
+    calibration_path: str = config.CALIBRATION_PATH,
 ) -> str:
     model = tf.keras.models.load_model(keras_model_path)
 
@@ -34,6 +70,7 @@ def quantize(
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+    _write_calibration_snapshot(out_path, calibration_path)
     return out_path
 
 

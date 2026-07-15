@@ -118,7 +118,8 @@ class DriftMonitor:
 
     @staticmethod
     def _class_distribution(rows: list[sqlite3.Row]) -> np.ndarray:
-        counts = np.full(len(config.THREAT_CLASSES), 1e-6, dtype=np.float64)
+        smoothing = float(getattr(config, "DRIFT_CLASS_SMOOTHING", 1e-6))
+        counts = np.full(len(config.THREAT_CLASSES), smoothing, dtype=np.float64)
         indexes = {name: index for index, name in enumerate(config.THREAT_CLASSES)}
         for row in rows:
             counts[indexes[row["predicted_label"]]] += 1.0

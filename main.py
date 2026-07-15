@@ -14,7 +14,14 @@ def cmd_train(args) -> None:
     from ml_engine.train_model import train
 
     _print_json(
-        train(dataset_mode=args.dataset, n_samples=args.samples, epochs=args.epochs)
+        train(
+            feed_names=args.feeds,
+            local_csv=args.local_csv,
+            phishtank_csv=args.phishtank_csv,
+            include_feedback=args.include_feedback,
+            epochs=args.epochs,
+            strict=args.strict,
+        )
     )
 
 
@@ -27,11 +34,29 @@ def cmd_scan(args) -> None:
     _print_json(result)
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
 def cmd_serve(args) -> None:
+    import logging
+
     import uvicorn
+
+    import config
 
     if args.reload and args.workers != 1:
         raise SystemExit("--reload and --workers cannot be used together")
+    if not config.API_KEYS:
+        if args.host not in _LOOPBACK_HOSTS:
+            raise SystemExit(
+                f"SHIELDNET_API_KEYS is unset and --host {args.host!r} is not "
+                "loopback — refusing to serve an unauthenticated API on a "
+                "reachable address. Set SHIELDNET_API_KEYS or bind to 127.0.0.1."
+            )
+        logging.getLogger("shieldnet").warning(
+            "SHIELDNET_API_KEYS is unset — all /api/v1 routes are unauthenticated. "
+            "This is fine for loopback-only local development, never otherwise."
+        )
     uvicorn.run(
         "api.server:app",
         host=args.host,
@@ -100,12 +125,38 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     train_parser = subparsers.add_parser(
-        "train", help="train and calibrate the URL model"
+        "train",
+        help="train and calibrate the URL model from real data (no synthetic data)",
     )
     train_parser.add_argument(
-        "--dataset", choices=["synthetic", "real", "combined"], default="synthetic"
+        "--feeds",
+        nargs="+",
+        choices=["urlhaus", "openphish", "tranco"],
+        default=None,
+        help="free feeds to pull (default: all three; covers safe/phishing/malware)",
     )
-    train_parser.add_argument("--samples", type=int, default=5000)
+    train_parser.add_argument(
+        "--local-csv",
+        nargs="+",
+        default=None,
+        help="local labeled CSV(s) with url,label columns — required for "
+        "data_leak/scam, which have no free real-time feed",
+    )
+    train_parser.add_argument(
+        "--phishtank-csv",
+        default=None,
+        help="manually downloaded PhishTank CSV export (API requires registration)",
+    )
+    train_parser.add_argument(
+        "--include-feedback",
+        action="store_true",
+        help="fold reviewed FeedbackStore corrections into training data",
+    )
+    train_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail if any requested feed/source is unavailable instead of skipping it",
+    )
     train_parser.add_argument("--epochs", type=int, default=None)
     train_parser.set_defaults(func=cmd_train)
 

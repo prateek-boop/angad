@@ -9,7 +9,6 @@ from ml_engine.fetch.redirect_resolver import resolve_chain
 from ml_engine.fetch.sandboxed_fetcher import fetch
 from ml_engine.fetch.ssrf_guard import validate_url
 
-
 PUBLIC_IP = "8.8.8.8"
 
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from api.deps import get_feedback_store
 from api.models.schemas import FeedbackRequest, FeedbackResponse
 from api.worker_pool import WorkerPoolBusy, worker_pool
-from pipeline.validation import InvalidURL, validate_url
+from pipeline.validation import InvalidURL, validate_url_format
 
 router = APIRouter()
 
@@ -11,7 +11,7 @@ router = APIRouter()
 @router.post("/feedback", response_model=FeedbackResponse, status_code=201)
 async def submit_feedback(request: FeedbackRequest) -> FeedbackResponse:
     try:
-        url = validate_url(request.url) if request.url else None
+        url = validate_url_format(request.url) if request.url else None
         feedback_id = await worker_pool.run(
             get_feedback_store().submit,
             scan_id=request.scan_id,

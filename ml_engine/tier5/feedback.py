@@ -186,6 +186,20 @@ class FeedbackStore:
             )
             return int(cursor.lastrowid)
 
+    def export_labeled_corrections(self) -> list[tuple[str, str]]:
+        """Redacted ``(url, correct_label)`` pairs for human-gated retraining.
+
+        The raw URL is never persisted (only a one-way fingerprint and a
+        redacted form — see :func:`redact_url`), so retraining consumes the
+        redacted URL. This is only ever pulled into training explicitly via
+        ``shieldnet train --include-feedback``; nothing ingests it automatically.
+        """
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT url_redacted, correct_label FROM feedback"
+            ).fetchall()
+        return [(row["url_redacted"], row["correct_label"]) for row in rows]
+
     def summary(self) -> dict:
         with self._connect() as connection:
             total = connection.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]

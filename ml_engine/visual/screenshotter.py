@@ -10,13 +10,12 @@ required in production to eliminate DNS-rebinding and browser-exploit risk.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from numbers import Real
-from typing import Callable
 
 import config
 from ml_engine.fetch.ssrf_guard import SSRFBlocked, check_url
-
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _USER_AGENT = "ShieldNet/0.1 visual-analyzer (+security-research)"

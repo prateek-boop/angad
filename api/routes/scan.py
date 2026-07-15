@@ -15,7 +15,7 @@ from api.models.schemas import (
     ScanResponse,
 )
 from api.worker_pool import WorkerPoolBusy, worker_pool
-from pipeline.validation import InvalidURL, validate_url
+from pipeline.validation import InvalidURL, validate_url_format
 
 router = APIRouter()
 
@@ -54,7 +54,7 @@ async def _dispatch_threat_event(result: dict) -> None:
 @router.post("/scan", response_model=ScanResponse)
 async def scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanResponse:
     try:
-        validate_url(request.url)
+        validate_url_format(request.url)
         # TensorFlow runtime initialization is performed on the application
         # thread once; initialized inference is then safe to dispatch.
         orchestrator = get_orchestrator()
@@ -78,7 +78,7 @@ async def scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanR
 async def scan_batch(request: BatchScanRequest) -> BatchScanResponse:
     try:
         for url in request.urls:
-            validate_url(url)
+            validate_url_format(url)
     except InvalidURL as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     semaphore = asyncio.Semaphore(min(4, len(request.urls)))

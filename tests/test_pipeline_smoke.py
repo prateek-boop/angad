@@ -1,8 +1,8 @@
 """End-to-end smoke test: real trained model, real API route, no mocks.
 Requires a trained model at config.MODEL_PATH (run train_model first)."""
 
-import os
 import asyncio
+import os
 
 import httpx
 import pytest
