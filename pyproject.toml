@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shieldnet"
+version = "1.0.0"
+description = "Calibrated multi-evidence URL threat analysis service"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "imagehash>=4.3,<5",
+  "numpy>=2,<3",
+  "pillow>=11,<13",
+  "pydantic>=2.10,<3",
+  "requests>=2.32,<3",
+  "scikit-learn>=1.6,<2",
+  "scipy>=1.14,<2",
+  "tensorflow>=2.21,<2.22",
+  "tldextract>=5.1,<6",
+  "urllib3>=2.2,<3",
+  "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+visual = ["playwright>=1.50,<2"]
+dev = ["httpx>=0.28,<1", "pytest>=8,<10"]
+
+[project.scripts]
+shieldnet = "main:main"
+
+[tool.setuptools]
+py-modules = ["config", "main"]
+
+[tool.setuptools.packages.find]
+include = ["api*", "ml_engine*", "pipeline*", "integrations*"]
+
+[tool.setuptools.package-data]
+ml_engine = ["saved_model/*.keras", "saved_model/*.json"]
+"integrations.browser_extension" = ["*.json", "*.js", "*.html", "*.css", "*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"

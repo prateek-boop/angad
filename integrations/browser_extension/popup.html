@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShieldNet</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <strong>ShieldNet</strong>
+    <button id="settings" class="icon-button" title="Settings" aria-label="Settings">&#9881;</button>
+  </header>
+  <main>
+    <div id="target" class="target">No scannable page</div>
+    <div class="controls">
+      <select id="depth" aria-label="Scan depth">
+        <option value="tier0">URL only</option>
+        <option value="tier1">Reputation</option>
+        <option value="tier2">Redirects</option>
+        <option value="tier3">Page structure</option>
+        <option value="tier4">Visual</option>
+      </select>
+      <button id="scan" class="primary">Scan</button>
+    </div>
+    <section id="result" hidden aria-live="polite">
+      <div class="verdict-row">
+        <span id="category"></span>
+        <span id="risk"></span>
+      </div>
+      <div class="risk-track"><div id="risk-fill"></div></div>
+      <ul id="reasons"></ul>
+    </section>
+    <div id="status" role="status"></div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
+

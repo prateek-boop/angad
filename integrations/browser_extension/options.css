@@ -1,0 +1,10 @@
+:root { font: 14px/1.5 system-ui, sans-serif; color: #182230; background: #f8fafc; }
+body { margin: 0; }
+main { width: min(560px, calc(100% - 32px)); margin: 48px auto; }
+h1 { font-size: 22px; letter-spacing: 0; }
+form { display: grid; gap: 16px; }
+label { display: grid; gap: 6px; font-weight: 600; }
+input { height: 38px; border: 1px solid #98a2b3; border-radius: 5px; padding: 0 10px; font: inherit; }
+button { width: 90px; height: 38px; border: 0; border-radius: 5px; color: #fff; background: #175cd3; font: 600 14px system-ui; cursor: pointer; }
+#status { color: #067647; }
+

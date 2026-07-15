@@ -1,0 +1,32 @@
+services:
+  shieldnet:
+    build:
+      context: .
+      args:
+        INSTALL_VISUAL: "1"
+    init: true
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      SHIELDNET_DATA_DIR: /app/data
+      SHIELDNET_API_KEYS: ${SHIELDNET_API_KEYS:?set SHIELDNET_API_KEYS}
+      SHIELDNET_REPUTATION_NETWORK_ENABLED: "true"
+      SHIELDNET_LIVE_FETCH_ENABLED: ${SHIELDNET_LIVE_FETCH_ENABLED:-false}
+      SHIELDNET_VISUAL_ANALYSIS_ENABLED: ${SHIELDNET_VISUAL_ANALYSIS_ENABLED:-false}
+    volumes:
+      - shieldnet-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 3g
+    shm_size: 512mb
+    restart: unless-stopped
+
+volumes:
+  shieldnet-data:
+
