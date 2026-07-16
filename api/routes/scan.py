@@ -55,13 +55,14 @@ async def _dispatch_threat_event(result: dict) -> None:
 async def scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanResponse:
     try:
         validate_url_format(request.url)
-        # TensorFlow runtime initialization is performed on the application
-        # thread once; initialized inference is then safe to dispatch.
+        # TensorFlow must finish initializing on this thread before dispatch.
         orchestrator = get_orchestrator()
         result = await worker_pool.run(_scan_sync, orchestrator, request)
     except WorkerPoolBusy as exc:
+        metrics.record_error("worker_pool_busy")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (InvalidURL, ValueError) as exc:
+        metrics.record_error("invalid_request")
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     metrics.record_scan(
         category=result["category"],
@@ -80,6 +81,7 @@ async def scan_batch(request: BatchScanRequest) -> BatchScanResponse:
         for url in request.urls:
             validate_url_format(url)
     except InvalidURL as exc:
+        metrics.record_error("invalid_request")
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     semaphore = asyncio.Semaphore(min(4, len(request.urls)))
     orchestrator = get_orchestrator()
@@ -92,8 +94,10 @@ async def scan_batch(request: BatchScanRequest) -> BatchScanResponse:
             try:
                 result = await worker_pool.run(_scan_sync, orchestrator, item)
             except WorkerPoolBusy as exc:
+                metrics.record_error("worker_pool_busy")
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
             except (InvalidURL, ValueError) as exc:
+                metrics.record_error("invalid_request")
                 raise HTTPException(
                     status_code=422, detail=f"{url[:120]}: {exc}"
                 ) from exc

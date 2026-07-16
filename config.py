@@ -2,6 +2,13 @@
 tier timeouts/thresholds, and file paths. See MODEL_BRAIN.md for the full spec."""
 
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _package_version
+
+try:
+    VERSION = _package_version("shieldnet")
+except PackageNotFoundError:  # running from a source tree without installing
+    VERSION = "0.0.0+source"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -53,7 +60,6 @@ TRAINING_STATE_PATH = os.path.join(SAVED_MODEL_DIR, "training_state.json")
 METRICS_PATH = os.path.join(SAVED_MODEL_DIR, "metrics.json")
 TFLITE_MODEL_PATH = os.path.join(SAVED_MODEL_DIR, "shieldnet_quantized_dynamic.tflite")
 CALIBRATION_PATH = os.path.join(SAVED_MODEL_DIR, "calibration.json")
-ENSEMBLE_PATH = os.path.join(SAVED_MODEL_DIR, "ensemble_lightgbm.txt")
 
 # --- Tier 1: reputation (free sources only) ----------------------------------
 
@@ -70,10 +76,6 @@ BLOCKLIST_URLS = {
     "openphish": "https://openphish.com/feed.txt",
     "tranco": "https://tranco-list.eu/top-1m.csv.zip",
 }
-# PhishTank now generally requires free registration for reliable API access.
-# Kept off by default so a "no auth available" environment doesn't silently
-# fail at runtime; flip on and add PHISHTANK_API_KEY once you have one.
-PHISHTANK_ENABLED = False
 
 # --- Tier 2/3: network fetching + SSRF guard ---------------------------------
 
@@ -90,13 +92,11 @@ LIVE_FETCH_ENABLED = _env_bool("SHIELDNET_LIVE_FETCH_ENABLED", False)
 
 SCREENSHOT_TIMEOUT_S = 15
 SCREENSHOT_VIEWPORT = {"width": 1280, "height": 800}
-REFERENCE_BRANDS_DIR = os.path.join(BASE_DIR, "visual", "reference_brands")
 PHASH_DISTANCE_THRESHOLD = 10  # hamming distance below this = suspicious visual match
 VISUAL_ANALYSIS_ENABLED = _env_bool("SHIELDNET_VISUAL_ANALYSIS_ENABLED", False)
 
 # --- Tier 5: ensemble, calibration, feedback, drift, webhooks ---------------
 
-ENSEMBLE_BLEND_GRID = [round(x * 0.1, 1) for x in range(0, 11)]  # 0.0..1.0 step 0.1
 FEEDBACK_DB = os.path.join(DATA_DIR, "feedback.sqlite3")
 DRIFT_DB = os.path.join(DATA_DIR, "drift.sqlite3")
 DRIFT_BASELINE_WINDOW = 500

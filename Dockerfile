@@ -19,7 +19,9 @@ RUN if [ "$INSTALL_VISUAL" = "1" ]; then \
     groupadd --system shieldnet && \
     useradd --system --gid shieldnet --home-dir /nonexistent shieldnet && \
     mkdir -p /app/data /tmp/shieldnet-home /opt/ms-playwright && \
-    chown -R shieldnet:shieldnet /app/data /tmp/shieldnet-home /opt/ms-playwright
+    chown -R shieldnet:shieldnet /app/data /tmp/shieldnet-home /opt/ms-playwright && \
+    find /app -type f -exec chmod a+r {} + && \
+    find /app -type d -exec chmod a+rx {} +
 
 USER shieldnet
 EXPOSE 8000

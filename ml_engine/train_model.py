@@ -273,7 +273,7 @@ def load_dataset(
     export with ``url``/``label`` columns) or a manually downloaded PhishTank
     export passed as ``phishtank_csv``.
     """
-    # If user provides local CSV, don't load default feeds to avoid deduplication losses
+    # A local CSV without explicit feed_names means feeds are opt-in, not default.
     names = (
         list(feed_names)
         if feed_names is not None

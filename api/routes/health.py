@@ -9,7 +9,7 @@ router = APIRouter()
 
 @router.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "shieldnet", "version": "1.0.0"}
+    return {"status": "ok", "service": "shieldnet", "version": config.VERSION}
 
 
 @router.get("/ready")

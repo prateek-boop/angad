@@ -71,7 +71,7 @@ class WebhookStore:
         *,
         url: str,
         secret: str,
-        min_threat_level: str = "high",
+        min_threat_level: str = config.WEBHOOK_THREAT_LEVEL_THRESHOLD,
         resolver=None,
     ) -> str:
         if len(secret.encode("utf-8")) < 16:

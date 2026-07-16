@@ -106,6 +106,7 @@ class TemperatureCalibrator:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(self.to_dict(), handle, indent=2)
                 handle.write("\n")
+            os.chmod(tmp_path, 0o644)
             os.replace(tmp_path, path)
         except Exception:
             try:

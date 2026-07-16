@@ -2,8 +2,6 @@
 
 from functools import lru_cache
 
-import config
-
 
 @lru_cache
 def get_orchestrator():
@@ -40,12 +38,3 @@ def get_webhook_dispatcher():
     from ml_engine.tier5.webhooks import WebhookDispatcher
 
     return WebhookDispatcher(get_webhook_store())
-
-
-def threat_level_for(risk_score: float) -> str:
-    for level, threshold in sorted(
-        config.THREAT_LEVEL_THRESHOLDS.items(), key=lambda item: -item[1]
-    ):
-        if risk_score >= threshold:
-            return level
-    return "low"

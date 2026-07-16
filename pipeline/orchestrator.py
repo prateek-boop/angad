@@ -363,10 +363,7 @@ class ScanOrchestrator:
         evidence_reasons = [item.reason for item in fused.contributions]
         model_reasons = self.explainer.explain(features, category)
         if evidence_reasons and not self.explainer.has_specific_reasons(features):
-            # Drop the generic heuristic filler (either the "safe" or the
-            # "no dominant heuristic" variant) whenever real ensemble evidence
-            # already explains the decision — it's noise, not signal, next to
-            # a concrete reason.
+            # Generic heuristic filler reads as noise next to concrete evidence.
             model_reasons = []
         reasons = list(dict.fromkeys(evidence_reasons + model_reasons))[:12]
         if not reasons:

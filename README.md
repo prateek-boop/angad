@@ -1,299 +1,141 @@
 # ShieldNet
 
-ShieldNet is a five-class URL threat-analysis service. It combines a local
-TensorFlow URL classifier with optional reputation, redirect, HTML, and visual
-evidence, then returns an explainable `allow`, `review`, or `block`
-decision through a CLI or FastAPI API.
+ShieldNet looks at a web address (a URL) and tells you whether it's
+probably safe to click, and *why*. Think of it like a spam filter, but for
+links instead of emails.
 
-The class order is part of the model and API contract:
+You give it a URL. It gives you back one of five labels, a risk score,
+and a plain-English explanation — not just "trust me."
 
-```text
-safe, phishing, malware, data_leak, scam
-```
+Want the full technical breakdown of every component? See
+**[BRAIN.md](BRAIN.md)** (whole-project architecture) and
+**[MODEL_BRAIN.md](MODEL_BRAIN.md)** (the neural network itself, feature by
+feature). This README is the friendly front door.
 
-## Project goal — what we are doing
+---
 
-This project is building a layered URL-security pipeline that can:
+## What does it actually do? (plain English)
 
-1. classify a URL from its characters and 41 engineered security features;
-2. enrich that prediction with threat feeds and domain metadata;
-3. safely inspect redirects and HTML when live fetching is enabled;
-4. compare a rendered page with verified brand screenshots when visual analysis
-   is enabled;
-5. combine the available evidence into a risk score and an explainable decision;
-6. collect redacted feedback and drift telemetry for later review and
-   retraining; and
-7. expose the result through a CLI, REST API, browser extension, webhooks, and
-   SIEM-friendly formats.
+1. You give ShieldNet a link, e.g. `http://totally-real-paypa1-login.com`.
+2. It reads the link itself — the characters, the length, whether it uses
+   `https`, whether it looks like it's imitating a bank, etc. — and runs
+   it through a trained AI model.
+3. Optionally (if you turn these on), it can go further: check the link
+   against known bad-website lists, follow where it actually redirects
+   to, look at the real page's HTML, or even take a screenshot and
+   compare it to what the real brand's website looks like.
+4. It combines everything it found into one verdict:
+   - **`allow`** — looks fine.
+   - **`review`** — suspicious, a human should double-check.
+   - **`block`** — don't go there.
+5. It tells you *why* — e.g. "URL does not use HTTPS" or "this page
+   visually matches PayPal's login page but isn't on PayPal's domain."
 
-ShieldNet is designed so that deeper and riskier network analysis is opt-in.
-A `tier0` scan is local. Higher tiers progressively contact external
-infrastructure or the submitted target.
+That's the whole product. Everything else in this repo (the CLI, the API,
+Docker, the browser extension) exists to run that pipeline reliably and
+let other software or people use it.
 
-## Current status
+## The five categories
 
-The application architecture is implemented across Tier 0 through Tier 5. The
-API, CLI, SSRF controls, feed ingestion, feedback, drift monitoring, signed
-webhooks, browser extension, Docker setup, and automated tests are present.
+Every scan gets a probability for each of these — it always picks the
+highest one as the main answer, but you can see all five numbers:
 
-**A trained model is not included in the current repository.** Until
-`ml_engine/saved_model/shieldnet_model.keras` is created:
+| Category | Meaning, in plain terms |
+|---|---|
+| `safe` | Nothing suspicious found |
+| `phishing` | Looks like it's impersonating a real company to steal your login/password |
+| `malware` | Looks like it tries to infect your device |
+| `data_leak` | Looks like it exposes or fishes for private/personal data |
+| `scam` | Deceptive, but not brand-impersonation — fake stores, fake prizes, crypto scams, etc. |
 
-- CLI and API scans cannot run;
-- `GET /api/v1/ready` returns `503 not_ready`; and
-- the two real-model API smoke tests are skipped.
+## Is this ready to use right now?
 
-Training is intentionally real-data-only. URLhaus, OpenPhish, and Tranco cover
-`malware`, `phishing`, and `safe`; you must provide labeled
-`data_leak` and `scam` examples. A trained model must then be evaluated on
-recent, campaign-separated data before its decisions are trusted for
-enforcement.
+Partly. A trained model is checked into this repository
+(`ml_engine/saved_model/`), so scanning works out of the box — but the
+current model has a **known, serious blind spot**: its "safe" training
+examples were all bare domains (`https://google.com`-style, no path),
+so it wrongly flags many real, legitimate URLs that have a path or a
+`www.` prefix as threats. Its 96% held-out test accuracy did not catch
+this because the test data had the same skew. The data pipeline has
+been fixed; **retrain before trusting its verdicts on real traffic**
+(see [Training the model yourself](#training-the-model-yourself), and
+the details in [MODEL_BRAIN.md](MODEL_BRAIN.md) §13).
 
-The evidence-fusion layer is currently an inspectable, hand-authored policy. It
-is not a learned ensemble model.
+The deeper checks (following redirects, fetching real pages, taking
+screenshots) are all switched **off by default** — they only turn on if
+you explicitly enable them, because they involve ShieldNet's server
+actually visiting the link you're scanning, which is riskier and slower.
+The instant, local check (just reading the URL text) always runs.
 
-## How a scan works
+## How deep a scan can go
 
-| Stage | Evidence | Network behavior |
+| Depth | What it checks | Does it visit the actual link? |
 |---|---|---|
-| **Tier 0** | Character CNN with attention plus 41 URL features | Fully local |
-| **Tier 1** | Cached URLhaus/OpenPhish matches, RDAP, DNS, and TLS metadata | Metadata lookups; submitted page is not fetched |
-| **Tier 2** | Redirect chain, domain changes, HTTPS downgrades, policy violations | Connects to each validated hop without buffering page bodies |
-| **Tier 3** | Bounded HTML, forms, password fields, brand/title mismatches, iframes | Fetches up to the configured byte limit; does not execute JavaScript |
-| **Tier 4** | Chromium screenshot and perceptual-hash comparison with known-good brands | Executes the page in an ephemeral guarded browser |
-| **Tier 5** | Calibration, evidence fusion, decisions, feedback, drift, and webhooks | Wraps every selected scan depth |
+| `tier0` (default, instant) | The URL text itself, via the trained model | No |
+| `tier1` | + known-bad-link lists, domain age/DNS/certificate info | Only metadata, not the page |
+| `tier2` | + where the link actually redirects to | Yes |
+| `tier3` | + the real page's HTML (login forms, hidden fields, etc.) | Yes |
+| `tier4` | + a screenshot compared against known real brand pages | Yes, with a real (sandboxed) browser |
 
-The requested depth includes all earlier tiers. For example, `tier3` runs
-Tiers 0, 1, 2, and 3 before fusion.
+Each deeper tier costs more time and requires the corresponding feature
+to be turned on (see [Enable deeper analysis](#enable-deeper-analysis)
+below). If a deeper tier fails or times out, ShieldNet still gives you an
+answer using whatever it managed to gather — it just tells you what it
+skipped.
 
-The final response separates classification from policy:
+Full request-by-request walkthrough, plus what every internal module and
+class is responsible for, is in **[BRAIN.md](BRAIN.md)**.
 
-- `category` is the highest-probability threat class;
-- `confidence` is the probability of that category;
-- `risk_score` is `1 - P(safe)`;
-- `uncertainty` is normalized probability entropy;
-- `decision` is `allow`, `review`, or `block`;
-- `reasons` and `evidence` explain the result; and
-- `tier_results` shows which evidence was available, disabled, skipped, or
-  unsuccessful.
+---
 
-Default risk thresholds are `0.40` for review and `0.65` for blocking.
-Critical threat evidence or a live-fetch policy violation can force a block.
+## Getting started
 
-## Repository layout
+### Requirements
 
-```text
-.
-├── main.py                         CLI entry point
-├── config.py                       Model contract, paths, limits, and settings
-├── api/
-│   ├── server.py                   FastAPI application
-│   ├── middleware.py               API keys, rate limiting, and security headers
-│   ├── worker_pool.py              Bounded background worker pool
-│   └── routes/                     Scan, feedback, webhook, health, and ops routes
-├── pipeline/
-│   ├── orchestrator.py             Runs tiers and builds the final decision
-│   └── validation.py               Shared URL validation
-├── ml_engine/
-│   ├── model.py                    TensorFlow/Keras model architecture
-│   ├── url_tokenizer.py            200-character URL tokenizer
-│   ├── feature_extractor.py        41 engineered URL features
-│   ├── train_model.py              Real-data training and evaluation
-│   ├── real_data_loader.py         Feed download, cache, and CSV parsing
-│   ├── reputation.py               Tier 1 reputation checks
-│   ├── fetch/                      SSRF guard, redirects, and bounded HTML fetch
-│   ├── visual/                     Tier 4 screenshots and pHash references
-│   └── tier5/                      Fusion, calibration, feedback, drift, webhooks
-├── integrations/
-│   ├── browser_extension/          Chromium Manifest V3 extension
-│   └── siem/                       JSON and CEF event formatting
-├── tests/                          Unit, security, integration, and smoke tests
-├── scripts/                        Bootstrap, start, and verification helpers
-├── Dockerfile
-├── docker-compose.yml
-└── MODEL_BRAIN.md                  Detailed model and feature contract
-```
+- Python `3.12`
+- [uv](https://docs.astral.sh/uv/) (the tool this project uses to manage
+  dependencies and run commands)
+- A headless Chromium browser (via Playwright) — only needed if you want
+  the screenshot-comparison feature (tier4)
+- A reasonable amount of CPU/RAM/disk if you plan to retrain the model
+  yourself (you don't need this just to *use* it)
 
-For the neural-network inputs, feature definitions, and compatibility contract,
-see [MODEL_BRAIN.md](MODEL_BRAIN.md).
-
-## Requirements
-
-- Python `3.12` (the project currently requires `>=3.12,<3.13`)
-- [uv](https://docs.astral.sh/uv/) for the documented local workflow
-- Chromium installed through Playwright only if Tier 4 is needed
-- enough CPU, memory, disk, and training data for TensorFlow model training
-
-## Install the project
-
-Install the runtime and development dependencies:
+### Install
 
 ```bash
 ./scripts/bootstrap.sh
 ```
 
-To install Playwright and its Chromium browser as well:
+Add `--visual` if you also want the screenshot-comparison feature:
 
 ```bash
 ./scripts/bootstrap.sh --visual
 ```
 
-The examples below use the generated console command:
+From here on, `uv run shieldnet ...` is the command you'll use for
+everything. (`.venv/bin/python main.py ...` also works, if you prefer not
+to use `uv`.)
 
-```bash
-uv run shieldnet --help
-```
-
-`.venv/bin/python main.py` can be used instead of `uv run shieldnet`.
-
-## Prepare data and train the model
-
-### 1. Refresh the public feeds
-
-```bash
-uv run shieldnet refresh-feeds --feeds urlhaus openphish tranco
-```
-
-The feeds provide:
-
-| Source | Training label | Purpose |
-|---|---|---|
-| URLhaus | `malware` | Malicious URL examples and runtime exact-match cache |
-| OpenPhish | `phishing` | Phishing examples and runtime exact-match cache |
-| Tranco | `safe` | Popular-domain safe examples for training |
-
-Feed files are bounded, validated, atomically cached under `data/`, and can
-fall back to a non-empty stale cache during a temporary provider outage.
-Training also checks these managed caches and may refresh a missing or expired
-feed. No submitted target URL is visited while loading training feeds.
-
-### 2. Supply the missing labels
-
-Create one or more CSV files containing real, reviewed examples. Common column
-names such as `url`/`link` and `label`/`class` are accepted.
-
-```csv
-url,label
-https://example.invalid/exposed-records,data_leak
-https://example.invalid/fake-investment,scam
-```
-
-Supported normalized labels are `safe`, `phishing`, `malware`,
-`data_leak`, and `scam`. A few aliases such as `benign`, `legit`,
-`fraud`, and `leak` are normalized by the loader.
-
-The trainer requires at least three usable examples in every class after
-deduplication. That is only a validation floor, not enough data for a useful
-detector.
-
-### 3. Train and calibrate
-
-```bash
-uv run shieldnet train \
-  --local-csv data/scam_and_leaks.csv \
-  --epochs 30
-```
-
-Useful training options:
-
-- `--feeds ...` selects public feeds;
-- `--local-csv file1.csv file2.csv` adds labeled local sources;
-- `--phishtank-csv export.csv` adds a manually downloaded PhishTank export;
-- `--include-feedback` explicitly includes all stored corrections; and
-- `--strict` fails instead of skipping an unavailable requested source.
-- training automatically resumes model and optimizer progress when a checkpoint
-  exists, preferring `last_checkpoint.keras` and falling back to
-  `best_model.keras`;
-- `--resume [checkpoint]` can force resume or select a specific checkpoint; and
-- `--restart` explicitly ignores checkpoints and starts again at epoch 1.
-
-`--epochs` is the total target when resuming. For example, if nine epochs were
-completed before interruption, this continues with epoch 10 and stops at 30:
-
-```bash
-uv run shieldnet train \
-  --local-csv data/shieldnet_training_fixed.csv \
-  --epochs 30
-```
-
-There is no built-in approval flag on a feedback row. Review stored feedback
-operationally before using `--include-feedback`.
-
-Training removes duplicate URLs, excludes conflicting labels, uses balanced
-class weights, fits temperature calibration on the validation split, and
-reports accuracy, balanced accuracy, macro F1, per-class accuracy, log loss,
-calibration error, a confusion matrix, and a classification report.
-
-The built-in trainer currently uses random stratified train/validation/test
-splits. Before deployment, also evaluate with a chronological,
-campaign-separated, and preferably domain-separated holdout to avoid measuring
-memorization as generalization.
-
-Generated artifacts are written to `ml_engine/saved_model/`:
-
-```text
-shieldnet_model.keras       model loaded by the CLI and API
-best_model.keras            best validation checkpoint
-last_checkpoint.keras       latest completed epoch, including optimizer state
-training_state.json         epoch and dataset identity for safe resume
-calibration.json            fitted temperature calibration
-metrics.json                training and test metrics
-```
-
-### 4. Optionally export TFLite
-
-```bash
-uv run shieldnet quantize
-```
-
-This creates `shieldnet_quantized_dynamic.tflite`. The FastAPI service uses
-the Keras model by default; TFLite is an optional deployment path.
-
-## Scan from the CLI
-
-After training:
+### Scan a URL right now
 
 ```bash
 uv run shieldnet scan "https://example.com" --depth tier0
 ```
 
-`test` is an alias for `scan`:
+You'll get back JSON with a category, a risk score, and reasons. That's
+it — that's the core feature.
 
-```bash
-uv run shieldnet test "https://example.com" --depth tier1
-```
-
-Use `--no-persist` to avoid writing scan context and drift telemetry. Use
-`--timeout-ms` to set a per-scan deadline within the configured maximum.
-
-## Run the API
-
-For loopback-only local development:
+### Run it as a web service instead
 
 ```bash
 uv run shieldnet serve
 ```
 
-The service listens on `http://127.0.0.1:8000` by default:
+This starts a local web server at `http://127.0.0.1:8000`. Open
+`http://127.0.0.1:8000/docs` in a browser for an interactive, clickable
+API explorer — a good way to try it without writing any code.
 
-- OpenAPI UI: `http://127.0.0.1:8000/docs`
-- health: `http://127.0.0.1:8000/api/v1/health`
-- readiness: `http://127.0.0.1:8000/api/v1/ready`
-
-When `SHIELDNET_API_KEYS` is empty, API authentication is disabled. In that
-state the CLI refuses to bind the server to a non-loopback host. Set one or more
-comma-separated keys before exposing the API:
-
-```bash
-export SHIELDNET_API_KEYS="replace-with-a-long-random-key"
-uv run shieldnet serve --host 0.0.0.0
-```
-
-Protected endpoints accept either `X-API-Key: <key>` or
-`Authorization: Bearer <key>`. Health and readiness remain public. Protected
-routes are limited to 30 requests per minute per client in each API process.
-
-### Scan one URL
+To actually scan something over the API:
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/scan \
@@ -302,7 +144,12 @@ curl -sS http://127.0.0.1:8000/api/v1/scan \
   -d '{"url":"https://example.com","depth":"tier1"}'
 ```
 
-Example response shape:
+(By default, running locally without setting `SHIELDNET_API_KEYS` skips
+the API-key check, so you can drop the header while experimenting on
+your own machine. If you expose the server beyond localhost, you must
+set a key — see below.)
+
+Example response:
 
 ```json
 {
@@ -331,10 +178,10 @@ Example response shape:
 }
 ```
 
-Values above are illustrative, not a promised prediction for
-`https://example.com`.
+(Numbers above are just an example, not a guaranteed prediction for that
+exact URL.)
 
-### Scan a batch
+### Scan a batch of URLs at once
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/scan/batch \
@@ -343,222 +190,272 @@ curl -sS http://127.0.0.1:8000/api/v1/scan/batch \
   -d '{"urls":["https://example.com","https://openai.com"],"depth":"tier0"}'
 ```
 
-The default maximum is 50 URLs for `tier0` and 10 URLs for network-enabled
-depths. Batch execution uses bounded concurrency.
+Limits: 50 URLs per batch at `tier0`, 10 URLs per batch for anything that
+visits the real page (`tier2`+).
 
-## API endpoints
+### All API endpoints
 
-| Method | Path | Purpose |
+| Method | Path | What it's for |
 |---|---|---|
 | `POST` | `/api/v1/scan` | Scan one URL |
-| `POST` | `/api/v1/scan/batch` | Scan a bounded batch |
-| `POST` | `/api/v1/feedback` | Submit a corrected label by scan ID or URL |
-| `POST` | `/api/v1/webhooks` | Register an SSRF-checked signed webhook |
-| `DELETE` | `/api/v1/webhooks/{id}` | Deactivate a webhook |
-| `GET` | `/api/v1/operations/metrics` | Read in-process counters and mean scan time |
-| `GET` | `/api/v1/operations/drift` | Read the rolling drift report |
-| `GET` | `/api/v1/operations/feedback` | Read correction counts |
-| `GET` | `/api/v1/health` | Liveness check |
-| `GET` | `/api/v1/ready` | Model and data-directory readiness |
+| `POST` | `/api/v1/scan/batch` | Scan several URLs at once |
+| `POST` | `/api/v1/feedback` | Tell ShieldNet a prediction was wrong (helps future retraining) |
+| `POST` | `/api/v1/webhooks` | Get notified automatically when something dangerous is found |
+| `DELETE` | `/api/v1/webhooks/{id}` | Turn off a webhook |
+| `GET` | `/api/v1/operations/metrics` | Basic usage stats |
+| `GET` | `/api/v1/operations/drift` | Is live traffic starting to look different from training data? |
+| `GET` | `/api/v1/operations/feedback` | How many corrections have been submitted |
+| `GET` | `/api/v1/health` | "Is the server alive?" |
+| `GET` | `/api/v1/ready` | "Is the model loaded and ready to scan?" |
 
-Blocked decisions returned by the single-URL `POST /api/v1/scan` endpoint
-trigger a background `threat.detected` webhook event. Webhook bodies are signed with HMAC-SHA256 in
-`X-ShieldNet-Signature: sha256=<digest>`; redirects are disabled during
-delivery.
+A `block` result from `/api/v1/scan` can also automatically fire a
+webhook alert (signed, so you can verify it really came from ShieldNet).
+
+---
 
 ## Enable deeper analysis
 
-Tier 1 network metadata is controlled separately from target fetching:
+By default, only the instant local check (`tier0`) runs. To turn on more:
 
 ```bash
+# tier1: check the URL against known-bad-link lists and domain metadata
 export SHIELDNET_REPUTATION_NETWORK_ENABLED=true
-```
 
-Enable Tiers 2 and 3:
-
-```bash
+# tier2 + tier3: let ShieldNet actually visit the link and inspect the page
 export SHIELDNET_LIVE_FETCH_ENABLED=true
-```
 
-Enable Tier 4 after installing Playwright and Chromium:
-
-```bash
+# tier4: also take a screenshot and compare it to known real brand pages
 export SHIELDNET_LIVE_FETCH_ENABLED=true
 export SHIELDNET_VISUAL_ANALYSIS_ENABLED=true
 ```
 
-Seed visual matching only from a URL you have independently verified as the
-official brand site:
+Tier 4 needs a small setup step first: teach it what a real brand's page
+looks like, using a URL *you've personally verified* is genuine:
 
 ```bash
-uv run shieldnet add-visual-reference paypal.com \
-  https://www.paypal.com/signin
+uv run shieldnet add-visual-reference paypal.com https://www.paypal.com/signin
 ```
 
-Remove a reference:
+(Looking similar to a known brand is a clue, not proof by itself —
+ShieldNet only raises real alarm when that look-alike page is sitting on
+a *different* domain than the real brand.)
+
+---
+
+## Training the model yourself
+
+You don't need to do this to use ShieldNet — a trained model already
+ships in this repo. This is only if you want to retrain it (e.g. to
+improve accuracy or add your own labeled data).
+
+**1. Download the free public threat-intelligence feeds:**
 
 ```bash
-uv run shieldnet remove-visual-reference paypal.com
+uv run shieldnet refresh-feeds --feeds urlhaus openphish tranco
 ```
 
-A close perceptual-hash match is evidence, not proof. ShieldNet raises visual
-risk only when the matching brand reference appears on another registered
-domain.
+| Feed | Teaches the model about | 
+|---|---|
+| URLhaus | `malware` examples |
+| OpenPhish | `phishing` examples |
+| Tranco | `safe` examples (popular, legitimate domains) |
 
-## Main configuration
+**2. Add your own labeled examples for `data_leak` and `scam`** — the
+free feeds don't cover those two, so you need a CSV like:
 
-Configuration is read from environment variables when the process starts.
-Python does not automatically load `.env`; export values in the shell for
-local runs. Docker Compose reads the included `.env.example` format.
+```csv
+url,label
+https://example.invalid/exposed-records,data_leak
+https://example.invalid/fake-investment,scam
+```
 
-| Variable | Default | Meaning |
+**3. Train:**
+
+```bash
+uv run shieldnet train --local-csv data/scam_and_leaks.csv --epochs 30
+```
+
+Handy options:
+
+- `--local-csv file1.csv file2.csv` — add your own labeled data
+- `--include-feedback` — fold in corrections people have submitted
+- `--restart` — ignore any saved progress and start over from scratch
+
+Training now **automatically resumes** if it gets interrupted (crash,
+Ctrl-C, out of memory) — it picks up from the last completed epoch
+instead of starting over. `--epochs` is always the *total* target: if 13
+epochs already finished, `--epochs 30` continues on to epoch 30, not 30
+more epochs. Everything needed to resume is saved to
+`ml_engine/saved_model/last_checkpoint.keras` and `training_state.json`
+after every epoch.
+
+Training reports accuracy, per-class accuracy, a confusion matrix, and
+calibration quality — all saved to `ml_engine/saved_model/metrics.json`.
+
+**A note on trust:** the built-in evaluation uses a random data split. Before
+relying on a newly trained model for real enforcement decisions, also test it
+on more recent data and data from campaigns/domains it has never seen, so
+you're measuring "does it generalize" rather than "did it memorize."
+
+---
+
+## Configuration
+
+ShieldNet is configured with environment variables (see
+[.env.example](.env.example) for a starter file, and [config.py](config.py)
+for the complete, authoritative list). The ones you're most likely to
+touch:
+
+| Variable | Default | What it controls |
 |---|---:|---|
-| `SHIELDNET_API_KEYS` | empty | Comma-separated API keys; empty is local unauthenticated mode |
-| `SHIELDNET_DATA_DIR` | `./data` | Feed caches and SQLite stores |
-| `SHIELDNET_REPUTATION_NETWORK_ENABLED` | `true` | Enable Tier 1 RDAP/DNS/TLS lookups |
-| `SHIELDNET_LIVE_FETCH_ENABLED` | `false` | Enable target fetching for Tiers 2 and 3 |
-| `SHIELDNET_VISUAL_ANALYSIS_ENABLED` | `false` | Enable Tier 4 Chromium analysis |
-| `SHIELDNET_BLOCK_RISK_THRESHOLD` | `0.65` | Calibrated risk threshold for blocking |
-| `SHIELDNET_REVIEW_RISK_THRESHOLD` | `0.40` | Risk threshold for review |
-| `SHIELDNET_DEFAULT_SCAN_TIMEOUT_MS` | `30000` | Default scan deadline |
-| `SHIELDNET_MAX_SCAN_TIMEOUT_MS` | `60000` | Maximum accepted scan deadline |
-| `SHIELDNET_MAX_FETCH_BYTES` | `2097152` | Maximum decompressed Tier 3 response bytes |
-| `SHIELDNET_MAX_BATCH_SIZE` | `50` | Maximum Tier 0 batch size |
-| `SHIELDNET_MAX_NETWORK_BATCH_SIZE` | `10` | Maximum higher-tier batch size |
-| `SHIELDNET_API_WORKER_POOL_SIZE` | `8` | Blocking scan workers per API process |
-| `SHIELDNET_TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` client IP |
+| `SHIELDNET_API_KEYS` | *(empty)* | Comma-separated list of allowed API keys. Empty = no key required (fine for local testing only) |
+| `SHIELDNET_DATA_DIR` | `./data` | Where cached feeds and local databases live |
+| `SHIELDNET_REPUTATION_NETWORK_ENABLED` | `true` | Turns tier1 lookups on/off |
+| `SHIELDNET_LIVE_FETCH_ENABLED` | `false` | Turns tier2/tier3 (actually visiting links) on/off |
+| `SHIELDNET_VISUAL_ANALYSIS_ENABLED` | `false` | Turns tier4 (screenshots) on/off |
+| `SHIELDNET_BLOCK_RISK_THRESHOLD` | `0.65` | Risk score above this → `block` |
+| `SHIELDNET_REVIEW_RISK_THRESHOLD` | `0.40` | Risk score above this → `review` |
 
-Only enable `SHIELDNET_TRUST_PROXY_HEADERS` when an actual trusted reverse
-proxy strips and rewrites incoming forwarding headers.
+Python doesn't read `.env` files automatically for local runs — export
+the variables in your shell, or use Docker Compose (which does read
+`.env`).
 
-See [config.py](config.py) and [.env.example](.env.example) for the full set of
-timeouts, limits, paths, and thresholds.
+---
 
-## Stored data and privacy
+## Running it with Docker
 
-By default, completed scans write to local SQLite stores under `data/`:
-
-- `feedback.sqlite3` stores redacted scan context and human corrections;
-- `drift.sqlite3` stores numeric features, probabilities, labels, and risk;
-- `webhooks.sqlite3` stores registrations and delivery history; and
-- `reputation_cache.sqlite3` caches Tier 1 metadata.
-
-Stored scan URLs have credentials and fragments removed, and query values are
-replaced with `REDACTED`. Submitter identities are hashed. Drift telemetry
-does not store raw URLs.
-
-These SQLite stores are appropriate for a single-host deployment. They should
-be replaced with coordinated external services before running multiple
-replicas that write shared state.
-
-## Browser extension and SIEM output
-
-The Manifest V3 browser extension is in
-`integrations/browser_extension/`. Load it as an unpacked Chromium extension,
-then configure the ShieldNet API URL and key in its options. Its default host
-permission is loopback only. See the
-[browser extension README](integrations/browser_extension/README.md).
-
-`integrations/siem/formatter.py` converts a scan result to stable compact JSON
-or CEF.
-
-## Docker deployment
-
-Train the model before building the image because the model artifact is copied
-into the read-only runtime image:
+The easiest way to run ShieldNet as a real, always-on service:
 
 ```bash
 cp .env.example .env
-# Replace the placeholder SHIELDNET_API_KEYS value in .env.
+# open .env and replace the placeholder SHIELDNET_API_KEYS value with a real random key
 docker compose up --build
 ```
 
-Compose publishes the API only on `127.0.0.1:8000`, runs as an unprivileged
-user, drops Linux capabilities, enables `no-new-privileges`, uses a read-only
-root filesystem, and persists `/app/data` in a named volume.
+This builds a container, runs it as a restricted, non-root user, and
+publishes the API only on `127.0.0.1:8000` (not exposed to the outside
+world by default). Data persists in a Docker volume between restarts.
 
-The image includes Playwright/Chromium, but live and visual analysis remain
-disabled unless their environment flags are enabled.
+The image includes the screenshot-comparison browser by default, but —
+same as running locally — tier2/3/4 stay switched off until you enable
+their environment variables.
 
-## Security boundary
+---
 
-Tiers 2 through 4 process attacker-controlled destinations and content. The
-implementation:
+## Privacy and what gets stored
 
-- accepts only HTTP and HTTPS on ports 80 and 443 for live analysis;
-- rejects URL credentials, malformed/local hostnames, metadata targets, and
-  non-global IP ranges;
-- rejects mixed public/private DNS answers;
-- connects the HTTP/TLS transport to a prevalidated DNS result;
-- validates TLS SNI and certificate hostnames;
-- revalidates every redirect;
-- disables automatic redirects and retries;
-- caps redirect count, elapsed time, decompressed body size, and parsed
-  references; and
-- guards browser subresources while disabling downloads, service workers,
-  WebSockets, and non-proxied WebRTC.
+If you leave the default settings on, every scan gets recorded locally so
+mistakes can be reviewed and fixed later. Specifically:
 
-Application checks do not eliminate browser vulnerabilities, DNS/network
-races, or deployment mistakes. Tier 3 and especially Tier 4 should run in a
-dedicated non-root worker or container with firewall rules that deny private,
-link-local, metadata, cluster, and control-plane networks. Do not place the
-browser worker on a host that can reach sensitive internal services.
+- `feedback.sqlite3` — the scan and its prediction, for human review
+- `drift.sqlite3` — statistics used to notice if the model is getting
+  stale compared to what it's currently seeing
+- `webhooks.sqlite3` — your webhook registrations
+- `reputation_cache.sqlite3` — cached lookups, to avoid repeat queries
 
-## Operational limitations
+Stored URLs have passwords/credentials and query-string values stripped
+out before saving — ShieldNet doesn't keep the sensitive parts of a link
+around. Use `--no-persist` on the CLI (or set it up equivalently via the
+API) if you don't want any of this recorded at all.
 
-- No trained model is currently checked in.
-- The fusion policy is hand-authored and must be validated on representative
-  labeled evidence before enforcement.
-- TensorFlow inference is serialized by a per-model lock.
-- API rate limits and metrics are in-process, so each worker or replica has
-  independent counters and limits.
-- Feedback, drift, reputation, and webhook persistence use local SQLite.
-- Webhook secrets are stored in a mode-`0600` SQLite file; use a managed
-  secret store for a multi-tenant deployment.
-- Structured logging and metrics export are intentionally minimal.
-- A visual match is only a heuristic signal.
+These are plain local SQLite files — fine for one server, not meant for
+multiple servers sharing state. See [BRAIN.md](BRAIN.md) for more on this
+tradeoff.
 
-## Verify the repository
+---
 
-Run compilation and the full test suite:
+## Other integrations
+
+- **Browser extension** (`integrations/browser_extension/`) — a Chrome
+  extension that warns you in-browser using this same API. Load it as an
+  "unpacked extension" in Chrome's developer mode; see its own
+  [README](integrations/browser_extension/README.md).
+- **SIEM output** (`integrations/siem/`) — formats scan results as JSON
+  or CEF for feeding into security monitoring tools.
+
+---
+
+## Safety notes (for anyone deploying this for real)
+
+Tiers 2–4 involve ShieldNet's server visiting a link that might be
+actively malicious. It's built with real guardrails for that: it refuses
+to fetch internal/private network addresses, validates certificates,
+caps how much it downloads and how long it waits, and disables
+autoplaying redirects/downloads/scripts that could otherwise be abused.
+Even so, if you're running this somewhere with access to sensitive
+internal systems, put the deeper-tier fetching on a separate,
+network-isolated worker. Full detail on every guardrail is in
+[BRAIN.md](BRAIN.md#7-deployment--devops).
+
+## Known limitations right now
+
+- **The checked-in model needs a retrain before real-world use.** Its
+  safe examples were all bare domains, so URLs with paths or a `www.`
+  prefix are frequently misclassified as threats even on famous
+  legitimate sites. The training-data loader has been fixed to emit
+  realistic URL forms; the model itself hasn't been retrained yet.
+- `scam` vs `safe` is the model's weakest measured distinction (~91%
+  accurate there vs. 94%+ elsewhere) — worth revisiting with more
+  training data.
+- The rule that combines model + extra evidence into a final decision is
+  a hand-written, inspectable policy, not itself a trained model — that's
+  intentional until there's enough labeled multi-signal data to safely
+  train and validate a replacement.
+- Everything here is designed for a single server. Running several
+  copies that need to share the same feedback/drift/rate-limit state
+  needs an external database, not the built-in SQLite files.
+
+---
+
+## Running the checks yourself
 
 ```bash
 ./scripts/run_checks.sh
 ```
 
-Run lint separately:
+or just the test suite:
 
 ```bash
-uv run ruff check .
+uv run pytest
 ```
 
-The GitHub Actions workflow runs lint, compilation, and tests on pushes to
-`main` and on pull requests.
+The full test suite and lint run clean. GitHub Actions runs the same
+checks automatically on every push and pull request.
 
-At the time this README was prepared, the current working tree passed:
+## All CLI commands
 
-```text
-111 passed, 2 skipped
-ruff: all checks passed
-compileall: passed
-```
-
-The two skipped tests are end-to-end API smoke tests that require the missing
-trained Keras model. After training, rerun the checks so those tests execute.
-
-## Useful CLI commands
-
-| Command | Purpose |
+| Command | What it does |
 |---|---|
-| `shieldnet train` | Train and calibrate from real data |
+| `shieldnet train` | Train and calibrate the model on real data |
 | `shieldnet scan URL` | Scan one URL |
-| `shieldnet test URL` | Alias for `scan` |
-| `shieldnet serve` | Start the FastAPI service |
-| `shieldnet refresh-feeds` | Download and validate feed caches |
-| `shieldnet quantize` | Export the trained model to TFLite |
-| `shieldnet drift` | Print the rolling drift report |
-| `shieldnet feedback-summary` | Print correction counts |
-| `shieldnet add-visual-reference` | Capture a verified brand reference |
+| `shieldnet test URL` | Same as `scan` |
+| `shieldnet serve` | Start the web API |
+| `shieldnet refresh-feeds` | Download the latest threat-intel feeds |
+| `shieldnet quantize` | Export a smaller/faster version of the model |
+| `shieldnet drift` | Check if live traffic looks different from training data |
+| `shieldnet feedback-summary` | See how many corrections have been submitted |
+| `shieldnet add-visual-reference` | Teach tier4 what a real brand page looks like |
 | `shieldnet remove-visual-reference` | Remove a brand reference |
 
-Use `uv run shieldnet <command> --help` for command-specific options.
+Run `uv run shieldnet <command> --help` for the full option list on any
+of these.
+
+## Where things live in this repo
+
+```text
+.
+├── main.py            CLI entry point
+├── config.py           All settings, paths, and limits in one place
+├── api/                 The web service (FastAPI)
+├── pipeline/            Ties everything together for one scan
+├── ml_engine/           The AI model, feature extraction, and evidence checks
+├── integrations/        Browser extension + SIEM export
+├── tests/                Automated tests
+├── scripts/              Setup and verification helpers
+├── Dockerfile / docker-compose.yml
+├── BRAIN.md              Full project architecture, explained
+└── MODEL_BRAIN.md        The neural network's internals, explained
+```
+
+See [BRAIN.md](BRAIN.md) for what every file and class in there is
+actually responsible for.

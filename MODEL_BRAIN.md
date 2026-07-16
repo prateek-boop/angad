@@ -341,8 +341,8 @@ Command:
 python main.py train --epochs 30
 # data_leak/scam need a local CSV; free feeds only cover safe/phishing/malware:
 python main.py train --local-csv data/scam_and_leaks.csv --epochs 30
-# existing checkpoints resume automatically; use --restart for a fresh epoch 1:
-python main.py train --local-csv data/scam_and_leaks.csv --epochs 30
+# rerunning the same command resumes from the last checkpoint automatically;
+# add --restart to ignore checkpoints and start fresh at epoch 1
 ```
 
 Important training settings:
@@ -549,6 +549,19 @@ only as good as that source.
 ### 3. The safe class is the hardest class
 
 The saved metrics show lower accuracy for `safe` than for threat classes. This means false positives are likely the biggest practical risk.
+
+**Verified 2026-07-16 — safe-corpus surface-form artifact.** Every safe
+training row (Tranco feed + the local bare-domain lists) had the exact
+form `https://domain` — no path, no trailing slash, no www prefix —
+while nearly every threat row has a path. The model therefore learned
+the *shape* instead of safeness: `https://google.com` scores safe 1.00,
+but `https://google.com/`, `https://www.google.com/`, and
+`https://en.wikipedia.org` all score phishing 1.00. Held-out test
+accuracy (96%) never caught this because the test split shares the same
+skew. `parse_tranco` now emits bare/slash/www variants per domain, but
+**the checked-in model predates that fix — retrain (ideally adding real
+path-carrying safe URLs, e.g. from PhiUSIIL's legitimate rows) before
+trusting its verdicts on real browsing URLs.**
 
 ### 4. Explanations are feature-threshold based
 

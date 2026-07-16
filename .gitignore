@@ -1,11 +1,28 @@
+# secrets / local env
 .env
-.coverage
-.pytest_cache/
+
+# Python
 __pycache__/
 *.py[cod]
 .venv/
-data/
-ml_engine/saved_model/*.tflite
 build/
 dist/
 *.egg-info/
+
+# test / lint caches
+.coverage
+.pytest_cache/
+.ruff_cache/
+
+# raw training datasets (large, not source code — see BRAIN.md for how to regenerate)
+data/
+
+# trained-model exports and local training-resume state we don't commit
+# (the deployable shieldnet_model.keras/calibration.json/metrics.json stay tracked)
+ml_engine/saved_model/*.tflite
+ml_engine/saved_model/best_model.keras
+ml_engine/saved_model/last_checkpoint.keras
+ml_engine/saved_model/training_state.json
+
+# OS cruft
+.DS_Store

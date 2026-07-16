@@ -84,6 +84,4 @@ class DaemonWorkerPool:
         return await future
 
 
-# Scale API throughput horizontally too (multiple worker processes/replicas);
-# each process keeps its own model and its own bounded queue.
 worker_pool = DaemonWorkerPool(workers=config.API_WORKER_POOL_SIZE)

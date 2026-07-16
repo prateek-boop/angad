@@ -65,8 +65,27 @@ def test_feed_parsers_skip_malformed_rows_and_honor_limit():
     assert parse_phishtank(phishtank) == [("http://phish.example/a", "phishing")]
     assert parse_tranco(tranco) == [
         ("https://example.com", "safe"),
+        ("https://example.com/", "safe"),
+        ("https://www.example.com/", "safe"),
         ("https://example.net", "safe"),
+        ("https://example.net/", "safe"),
+        ("https://www.example.net/", "safe"),
     ]
+
+
+def test_tranco_emits_url_form_variants_so_safe_is_not_one_shape():
+    # Regression: a safe corpus made only of bare "https://domain" rows
+    # teaches the model that surface form instead of safeness, so any URL
+    # with a slash or www prefix gets classified as a threat.
+    rows = parse_tranco(io.StringIO("1,google.com\n2,en.wikipedia.org\n"))
+    urls = [url for url, _ in rows]
+    assert "https://google.com" in urls
+    assert "https://google.com/" in urls
+    assert "https://www.google.com/" in urls
+    # subdomains get slash variants but no fabricated www.<subdomain> form
+    assert "https://en.wikipedia.org/" in urls
+    assert "https://www.en.wikipedia.org/" not in urls
+    assert all(label == "safe" for _, label in rows)
 
 
 def test_generic_labeled_csv_maps_aliases_and_rejects_unknown_labels():
@@ -199,8 +218,15 @@ def test_real_dataset_survives_partial_feed_failure_and_resolves_label_conflict(
         },
     )
 
-    assert urls == ["https://EXAMPLE.com/#fragment", "https://phish.example/login"]
-    assert labels == ["phishing", "phishing"]
+    # example.com's bare/slash tranco variants collapse to one canonical key
+    # and lose the label conflict to openphish; www.example.com is a distinct
+    # host and keeps its safe label.
+    assert urls == [
+        "https://EXAMPLE.com/#fragment",
+        "https://www.example.com/",
+        "https://phish.example/login",
+    ]
+    assert labels == ["phishing", "safe", "phishing"]
 
 
 def test_real_dataset_strict_mode_reports_partial_failure():

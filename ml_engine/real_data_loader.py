@@ -165,7 +165,14 @@ def parse_phishtank(source, limit: int | None = None) -> list[tuple[str, str]]:
 
 
 def parse_tranco(source, limit: int | None = None) -> list[tuple[str, str]]:
-    """Parse Tranco's ``rank,domain`` CSV into HTTPS safe examples."""
+    """Parse Tranco's ``rank,domain`` CSV into HTTPS safe examples.
+
+    Each domain is emitted in several real URL surface forms (bare, trailing
+    slash, and www-prefixed for registered domains). A safe corpus with only
+    one surface form teaches the model that *form*, not safeness: trained on
+    bare ``https://domain`` rows alone, the model classifies any URL with a
+    path, trailing slash, or www prefix as a threat regardless of the domain.
+    """
 
     def records():
         for line in _iter_text_lines(source):
@@ -182,9 +189,13 @@ def parse_tranco(source, limit: int | None = None) -> list[tuple[str, str]]:
             domain = row[1].strip().rstrip(".")
             if "/" in domain or "@" in domain or not domain:
                 continue
-            url = _valid_url(f"https://{domain}")
-            if url is not None:
-                yield url, "safe"
+            variants = [f"https://{domain}", f"https://{domain}/"]
+            if domain.count(".") == 1 and not domain.startswith("www."):
+                variants.append(f"https://www.{domain}/")
+            for candidate in variants:
+                url = _valid_url(candidate)
+                if url is not None:
+                    yield url, "safe"
 
     return _dedupe(records(), limit)
 
