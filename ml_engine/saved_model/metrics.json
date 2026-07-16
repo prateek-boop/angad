@@ -1,0 +1,122 @@
+{
+  "test_loss": 0.11481175571680069,
+  "test_accuracy": 0.9610558748245239,
+  "balanced_accuracy": 0.9604011974113329,
+  "macro_f1": 0.9553871074727119,
+  "raw_log_loss": 0.11421546669978622,
+  "calibrated_log_loss": 0.10568178048294828,
+  "raw_expected_calibration_error": 0.013620111407593468,
+  "calibrated_expected_calibration_error": 0.0021021235377825277,
+  "temperature": 1.3846222838835247,
+  "per_class_accuracy": {
+    "safe": 0.965062008267769,
+    "phishing": 0.9865730221028713,
+    "malware": 0.9920535340861564,
+    "data_leak": 0.9482758620689655,
+    "scam": 0.9100415605309022
+  },
+  "confusion_matrix": [
+    [
+      14474,
+      0,
+      0,
+      0,
+      524
+    ],
+    [
+      40,
+      9552,
+      56,
+      5,
+      29
+    ],
+    [
+      0,
+      18,
+      2372,
+      1,
+      0
+    ],
+    [
+      0,
+      2,
+      1,
+      55,
+      0
+    ],
+    [
+      658,
+      13,
+      0,
+      0,
+      6788
+    ]
+  ],
+  "classification_report": {
+    "safe": {
+      "precision": 0.9539941998418139,
+      "recall": 0.965062008267769,
+      "f1-score": 0.9594961882664899,
+      "support": 14998.0
+    },
+    "phishing": {
+      "precision": 0.9965571205007825,
+      "recall": 0.9865730221028713,
+      "f1-score": 0.9915399387553848,
+      "support": 9682.0
+    },
+    "malware": {
+      "precision": 0.9765335529024289,
+      "recall": 0.9920535340861564,
+      "f1-score": 0.9842323651452282,
+      "support": 2391.0
+    },
+    "data_leak": {
+      "precision": 0.9016393442622951,
+      "recall": 0.9482758620689655,
+      "f1-score": 0.9243697478991597,
+      "support": 58.0
+    },
+    "scam": {
+      "precision": 0.9246696635335785,
+      "recall": 0.9100415605309022,
+      "f1-score": 0.9172972972972973,
+      "support": 7459.0
+    },
+    "accuracy": 0.9610558575228403,
+    "macro avg": {
+      "precision": 0.9506787762081798,
+      "recall": 0.9604011974113329,
+      "f1-score": 0.9553871074727119,
+      "support": 34588.0
+    },
+    "weighted avg": {
+      "precision": 0.9610549577070079,
+      "recall": 0.9610558575228403,
+      "f1-score": 0.9610167425011965,
+      "support": 34588.0
+    }
+  },
+  "class_counts": {
+    "safe": 99988,
+    "phishing": 64543,
+    "malware": 15940,
+    "data_leak": 388,
+    "scam": 49725
+  },
+  "n_train": 161408,
+  "n_val": 34588,
+  "n_test": 34588,
+  "feed_names": [
+    "urlhaus",
+    "openphish",
+    "tranco"
+  ],
+  "local_csv_count": 1,
+  "used_phishtank_csv": false,
+  "included_feedback": false,
+  "resumed_from": "/home/lucifer/Projects/legit/ml_engine/saved_model/last_checkpoint.keras",
+  "initial_epoch": 12,
+  "epochs_run": 6,
+  "epochs_completed": 18
+}

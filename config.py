@@ -48,6 +48,8 @@ TRAIN_CONFIG = {
 
 MODEL_PATH = os.path.join(SAVED_MODEL_DIR, "shieldnet_model.keras")
 BEST_MODEL_PATH = os.path.join(SAVED_MODEL_DIR, "best_model.keras")
+LAST_CHECKPOINT_PATH = os.path.join(SAVED_MODEL_DIR, "last_checkpoint.keras")
+TRAINING_STATE_PATH = os.path.join(SAVED_MODEL_DIR, "training_state.json")
 METRICS_PATH = os.path.join(SAVED_MODEL_DIR, "metrics.json")
 TFLITE_MODEL_PATH = os.path.join(SAVED_MODEL_DIR, "shieldnet_quantized_dynamic.tflite")
 CALIBRATION_PATH = os.path.join(SAVED_MODEL_DIR, "calibration.json")

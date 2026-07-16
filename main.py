@@ -21,6 +21,7 @@ def cmd_train(args) -> None:
             include_feedback=args.include_feedback,
             epochs=args.epochs,
             strict=args.strict,
+            resume_from=args.resume,
         )
     )
 
@@ -157,7 +158,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="fail if any requested feed/source is unavailable instead of skipping it",
     )
-    train_parser.add_argument("--epochs", type=int, default=None)
+    train_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="total target epoch count; when resuming, completed epochs are skipped",
+    )
+    resume_group = train_parser.add_mutually_exclusive_group()
+    resume_group.add_argument(
+        "--resume",
+        nargs="?",
+        const="auto",
+        default="auto_if_available",
+        metavar="CHECKPOINT",
+        help="resume optimizer/model progress from last_checkpoint.keras, falling "
+        "back to best_model.keras (the default); optionally provide a checkpoint path",
+    )
+    resume_group.add_argument(
+        "--restart",
+        action="store_const",
+        const=False,
+        dest="resume",
+        help="ignore existing checkpoints and start again at epoch 1",
+    )
     train_parser.set_defaults(func=cmd_train)
 
     for command in ("scan", "test"):

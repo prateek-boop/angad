@@ -4,9 +4,7 @@
 __pycache__/
 *.py[cod]
 .venv/
-data/*.sqlite3*
-data/*_feed.cache
-data/visual_reference_store.json
+data/
 ml_engine/saved_model/*.tflite
 build/
 dist/

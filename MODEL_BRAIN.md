@@ -341,6 +341,8 @@ Command:
 python main.py train --epochs 30
 # data_leak/scam need a local CSV; free feeds only cover safe/phishing/malware:
 python main.py train --local-csv data/scam_and_leaks.csv --epochs 30
+# existing checkpoints resume automatically; use --restart for a fresh epoch 1:
+python main.py train --local-csv data/scam_and_leaks.csv --epochs 30
 ```
 
 Important training settings:
@@ -367,6 +369,13 @@ Best checkpoint:
 
 ```text
 ml_engine/saved_model/best_model.keras
+```
+
+Latest resumable checkpoint and state:
+
+```text
+ml_engine/saved_model/last_checkpoint.keras
+ml_engine/saved_model/training_state.json
 ```
 
 ## 8. Data Brain

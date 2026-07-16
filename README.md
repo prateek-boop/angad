@@ -201,6 +201,20 @@ Useful training options:
 - `--phishtank-csv export.csv` adds a manually downloaded PhishTank export;
 - `--include-feedback` explicitly includes all stored corrections; and
 - `--strict` fails instead of skipping an unavailable requested source.
+- training automatically resumes model and optimizer progress when a checkpoint
+  exists, preferring `last_checkpoint.keras` and falling back to
+  `best_model.keras`;
+- `--resume [checkpoint]` can force resume or select a specific checkpoint; and
+- `--restart` explicitly ignores checkpoints and starts again at epoch 1.
+
+`--epochs` is the total target when resuming. For example, if nine epochs were
+completed before interruption, this continues with epoch 10 and stops at 30:
+
+```bash
+uv run shieldnet train \
+  --local-csv data/shieldnet_training_fixed.csv \
+  --epochs 30
+```
 
 There is no built-in approval flag on a feedback row. Review stored feedback
 operationally before using `--include-feedback`.
@@ -220,6 +234,8 @@ Generated artifacts are written to `ml_engine/saved_model/`:
 ```text
 shieldnet_model.keras       model loaded by the CLI and API
 best_model.keras            best validation checkpoint
+last_checkpoint.keras       latest completed epoch, including optimizer state
+training_state.json         epoch and dataset identity for safe resume
 calibration.json            fitted temperature calibration
 metrics.json                training and test metrics
 ```

@@ -565,7 +565,7 @@ def load_real_dataset(
     for index, source in enumerate(local_sources or ()):
         source_name = f"local[{index}]"
         try:
-            records = parse_labeled_csv(source, limit=max_per_feed)
+            records = parse_labeled_csv(source, limit=None)
             if not records:
                 raise FeedParseError("local CSV contained no valid labeled URLs")
             add_records(records)
