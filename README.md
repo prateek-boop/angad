@@ -51,15 +51,16 @@ highest one as the main answer, but you can see all five numbers:
 ## Is this ready to use right now?
 
 Partly. A trained model is checked into this repository
-(`ml_engine/saved_model/`), so scanning works out of the box — but the
-current model has a **known, serious blind spot**: its "safe" training
-examples were all bare domains (`https://google.com`-style, no path),
-so it wrongly flags many real, legitimate URLs that have a path or a
-`www.` prefix as threats. Its 96% held-out test accuracy did not catch
-this because the test data had the same skew. The data pipeline has
-been fixed; **retrain before trusting its verdicts on real traffic**
-(see [Training the model yourself](#training-the-model-yourself), and
-the details in [MODEL_BRAIN.md](MODEL_BRAIN.md) §13).
+(`ml_engine/saved_model/`), so scanning works out of the box, and its
+worst blind spot — misclassifying *any* URL with a path as a threat
+just because "safe" training examples were all bare domains — has been
+fixed and retrained (test accuracy 97.96%). But a real gap remains: it
+still leans on "does this URL have 2+ path segments" as a mild threat
+signal, so real multi-segment-path URLs like
+`github.com/anthropics/claude-code` or `en.wikipedia.org/wiki/URL` are
+sometimes still misclassified. See
+[What's left](#whats-left-known-gaps) for the full picture and
+[MODEL_BRAIN.md](MODEL_BRAIN.md) §13 for the technical detail.
 
 The deeper checks (following redirects, fetching real pages, taking
 screenshots) are all switched **off by default** — they only turn on if
@@ -387,16 +388,36 @@ internal systems, put the deeper-tier fetching on a separate,
 network-isolated worker. Full detail on every guardrail is in
 [BRAIN.md](BRAIN.md#7-deployment--devops).
 
-## Known limitations right now
+## What's left (known gaps)
 
-- **The checked-in model needs a retrain before real-world use.** Its
-  safe examples were all bare domains, so URLs with paths or a `www.`
-  prefix are frequently misclassified as threats even on famous
-  legitimate sites. The training-data loader has been fixed to emit
-  realistic URL forms; the model itself hasn't been retrained yet.
-- `scam` vs `safe` is the model's weakest measured distinction (~91%
-  accurate there vs. 94%+ elsewhere) — worth revisiting with more
-  training data.
+Status as of the 2026-07-17 retrain (test accuracy 97.96%, calibrated
+log loss 0.064 — see `ml_engine/saved_model/metrics.json` for the full
+report):
+
+- **Fixed:** the original bug where *any* URL with a path, trailing
+  slash, or `www.` prefix was misclassified as a threat just because
+  every "safe" training example used to be a bare domain
+  (`https://google.com`, nothing after it). The training-data loader
+  now emits realistic form variants, and the model has been retrained
+  on a form-diversified safe corpus.
+- **Still open — multi-segment-path bias.** The model still leans on
+  "does this URL have 2+ path segments" as a mild threat signal.
+  Verified examples that still misclassify:
+  `https://en.wikipedia.org/wiki/URL` and
+  `https://github.com/anthropics/claude-code` both score as threats
+  despite being on entirely legitimate, well-known domains. Root cause:
+  the safe-with-path training examples skew toward single-segment/
+  query-string URLs, while real popular sites often use short,
+  multi-segment paths that statistically resemble the phishing/scam
+  training paths. Fixing this needs a more deliberately curated safe
+  corpus (specifically more real multi-segment-path examples), not
+  just more volume, followed by another retrain.
+- `data_leak` recall dropped to ~84% in the latest run (down from ~95%
+  in the pre-fix model) — likely a side effect of the safe-corpus
+  rebalance diluting its already-small 388-row class. Worth watching
+  after the next retrain.
+- `scam` vs `safe` confusion, which was the previous run's weak point,
+  is now resolved as a side effect (scam recall is 99.6%).
 - The rule that combines model + extra evidence into a final decision is
   a hand-written, inspectable policy, not itself a trained model — that's
   intentional until there's enough labeled multi-signal data to safely
