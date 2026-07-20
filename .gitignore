@@ -19,7 +19,7 @@ data/
 
 # trained-model exports and local training-resume state we don't commit
 # (the deployable shieldnet_model.keras/calibration.json/metrics.json stay tracked)
-ml_engine/saved_model/*.tflite
+ml_engine/saved_model/*.tflite*
 ml_engine/saved_model/best_model.keras
 ml_engine/saved_model/last_checkpoint.keras
 ml_engine/saved_model/training_state.json

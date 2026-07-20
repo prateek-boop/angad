@@ -461,6 +461,13 @@ checks automatically on every push and pull request.
 Run `uv run shieldnet <command> --help` for the full option list on any
 of these.
 
+`shieldnet quantize` converts `ml_engine/saved_model/shieldnet_model.keras`
+into a dynamic-range-quantized `shieldnet_quantized_dynamic.tflite`
+(~10x smaller, negligible accuracy loss) for embedding in mobile/edge
+apps such as an Android APK via the TFLite interpreter. The `.tflite`
+output isn't tracked in git — regenerate it locally with
+`uv run shieldnet quantize` whenever `shieldnet_model.keras` changes.
+
 ## Where things live in this repo
 
 ```text

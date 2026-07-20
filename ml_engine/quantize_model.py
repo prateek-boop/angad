@@ -52,9 +52,11 @@ def quantize(
 ) -> str:
     model = tf.keras.models.load_model(keras_model_path)
 
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    tflite_model = converter.convert()
+    with tempfile.TemporaryDirectory() as saved_model_dir:
+        model.export(saved_model_dir)
+        converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        tflite_model = converter.convert()
 
     directory = os.path.dirname(out_path) or "."
     os.makedirs(directory, exist_ok=True)
