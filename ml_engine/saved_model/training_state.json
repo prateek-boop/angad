@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "checkpoint_path": "/home/lucifer/Projects/legit/ml_engine/saved_model/last_checkpoint.keras",
+  "completed_epochs": 15,
+  "optimizer_iterations": 41115,
+  "dataset_fingerprint": "93228f74141705d66f546d3494c7fbbfafd5d2aa4108274f4c880c53b7a86a1b",
+  "n_train": 175415,
+  "batch_size": 64,
+  "steps_per_epoch": 2741,
+  "best_val_accuracy": 0.9818834662437439
+}
