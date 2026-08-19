@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧱 NetGuard | Live Security Dashboard</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0a0a0c; color: #eee; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        header { border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .status-badge { padding: 5px 12px; border-radius: 20px; font-size: 12px; background: #28a745; color: white; }
+        .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        .card { background: #1a1a1e; padding: 20px; border-radius: 8px; border: 1px solid #333; height: 500px; overflow-y: auto; }
+        h3 { margin-top: 0; color: #5bc0de; }
+        .log-entry { font-family: monospace; font-size: 13px; padding: 5px 0; border-bottom: 1px solid #222; }
+        .verdict-block { color: #f0ad4e; font-weight: bold; }
+        .verdict-normal { color: #5cb85c; }
+        .verdict-critical { color: #d9534f; background: rgba(217, 83, 79, 0.1); padding: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧱 SHAKTI X <span style="color:#5bc0de">3.0</span></h1>
+            <div id="connection-status" class="status-badge">ENGINE ONLINE</div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h3>🛰️ LIVE TRAFFIC FEED</h3>
+                <div id="traffic-logs"></div>
+            </div>
+            <div class="card">
+                <h3>🧠 AI VERDICTS</h3>
+                <div id="verdict-logs"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io("http://localhost:8080");
+        
+        // Connection status
+        socket.on('connect', () => {
+            document.getElementById('connection-status').textContent = 'ENGINE ONLINE';
+            document.getElementById('connection-status').style.background = '#28a745';
+        });
+        
+        socket.on('disconnect', () => {
+            document.getElementById('connection-status').textContent = 'DISCONNECTED';
+            document.getElementById('connection-status').style.background = '#dc3545';
+        });
+        
+        socket.on('system_status', (data) => {
+            console.log('System:', data.message);
+        });
+
+        socket.on('new_connection', (data) => {
+            const logs = document.getElementById('traffic-logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `[${new Date().toLocaleTimeString()}] <span style="color:#5bc0de">PID ${data.uid}</span> → ${data.dst_ip}:${data.dst_port} (${data.protocol || 'TCP'})`;
+            logs.prepend(entry);
+            if (logs.children.length > 50) logs.lastChild.remove();
+        });
+
+        socket.on('security_event', (data) => {
+            const logs = document.getElementById('verdict-logs');
+            const entry = document.createElement('div');
+            const riskClass = data.risk_score > 0.7 ? 'verdict-critical' : data.risk_score > 0.4 ? 'verdict-block' : 'verdict-normal';
+            entry.className = 'log-entry ' + riskClass;
+            entry.innerHTML = `
+                <b>PID: ${data.uid}</b><br>
+                Risk: ${(data.risk_score * 100).toFixed(0)}% | Class: <b>${data.classification}</b><br>
+                Action: <span style="font-weight:bold; color:${data.action === 'BLOCK' ? '#d9534f' : data.action === 'WARN' ? '#f0ad4e' : '#5cb85c'}">${data.action}</span>
+            `;
+            logs.prepend(entry);
+            if (logs.children.length > 30) logs.lastChild.remove();
+        });
+    </script>
+</body>
+</html>

@@ -63,10 +63,11 @@ sometimes still misclassified. See
 [MODEL_BRAIN.md](MODEL_BRAIN.md) §13 for the technical detail.
 
 The deeper checks (following redirects, fetching real pages, taking
-screenshots) are all switched **off by default** — they only turn on if
-you explicitly enable them, because they involve ShieldNet's server
-actually visiting the link you're scanning, which is riskier and slower.
-The instant, local check (just reading the URL text) always runs.
+screenshots) are enabled **by default** — every scan runs all tiers.
+They can be switched off with `SHIELDNET_LIVE_FETCH_ENABLED=false` /
+`SHIELDNET_VISUAL_ANALYSIS_ENABLED=false` if you don't want ShieldNet's
+server actually visiting the link you're scanning (which is riskier and
+slower). The instant, local check (just reading the URL text) always runs.
 
 ## How deep a scan can go
 
@@ -107,15 +108,22 @@ class is responsible for, is in **[BRAIN.md](BRAIN.md)**.
 ./scripts/bootstrap.sh
 ```
 
-Add `--visual` if you also want the screenshot-comparison feature:
-
-```bash
-./scripts/bootstrap.sh --visual
-```
+Playwright (with headless Chromium) is a base dependency — every install
+gets the full five-tier scanner, no extra steps. The `--visual` flag is
+kept for compatibility but no longer changes what gets installed:
 
 From here on, `uv run shieldnet ...` is the command you'll use for
 everything. (`.venv/bin/python main.py ...` also works, if you prefer not
 to use `uv`.)
+
+If you're not using `uv` at all, install the pinned runtime dependencies
+straight from [`requirements.txt`](requirements.txt) (which mirrors
+`pyproject.toml`). Playwright is already included, so all five tiers work
+out of the box:
+
+```bash
+pip install -r requirements.txt
+```
 
 ### Scan a URL right now
 
@@ -125,6 +133,44 @@ uv run shieldnet scan "https://example.com" --depth tier0
 
 You'll get back JSON with a category, a risk score, and reasons. That's
 it — that's the core feature.
+
+### Get a fully annotated report instead
+
+```bash
+uv run shieldnet explain "https://example.com"
+```
+
+Same five-tier scan, but the answer explains *every* field: why the model
+gave the probabilities it did, what each reputation/redirect/HTML/visual
+signal means, the ensemble effect of each piece of evidence, and a
+one-sentence verdict. This is the plain-English report format:
+
+```json
+{
+  "verdict": {
+    "category": "safe",
+    "confidence": 0.797,
+    "risk_score": 0.203,
+    "uncertainty": 0.35,
+    "threat_level": "low",
+    "decision": "allow",
+    "explanation": {
+      "category": "final fused label: safe",
+      "risk_score": "1 - P(safe) = 0.203. Below the block threshold (0.65) and review threshold (0.4) -> allow",
+      "uncertainty": "normalized entropy of the 5-class distribution: 0.35 is moderate (model was torn between safe/phishing on URL text alone)"
+    }
+  },
+  "tiers": [
+    { "tier": "tier0", "title": "TIER 0 — the neural network itself (URL text only)", "fields": [
+      { "name": "raw_probabilities", "value": { "safe": 0.67, "phishing": 0.31 },
+        "meaning": "this is what the network actually output, before any correction" }
+    ]}
+  ],
+  "phishing_analysis": ["..."],
+  "why_in_one_sentence": "Why NOT safe, in one sentence: ...",
+  "evidence": [{ "source": "reputation", "reason": "...", "logit_delta": { "safe": 0.35 } }]
+}
+```
 
 ### Run it as a web service instead
 
@@ -216,18 +262,18 @@ webhook alert (signed, so you can verify it really came from ShieldNet).
 
 ## Enable deeper analysis
 
-By default, only the instant local check (`tier0`) runs. To turn on more:
+All tiers run by default. To turn a tier off (e.g. in a locked-down
+deployment that must not fetch hostile content):
 
 ```bash
 # tier1: check the URL against known-bad-link lists and domain metadata
-export SHIELDNET_REPUTATION_NETWORK_ENABLED=true
+export SHIELDNET_REPUTATION_NETWORK_ENABLED=false
 
 # tier2 + tier3: let ShieldNet actually visit the link and inspect the page
-export SHIELDNET_LIVE_FETCH_ENABLED=true
+export SHIELDNET_LIVE_FETCH_ENABLED=false
 
 # tier4: also take a screenshot and compare it to known real brand pages
-export SHIELDNET_LIVE_FETCH_ENABLED=true
-export SHIELDNET_VISUAL_ANALYSIS_ENABLED=true
+export SHIELDNET_VISUAL_ANALYSIS_ENABLED=false
 ```
 
 Tier 4 needs a small setup step first: teach it what a real brand's page
@@ -312,8 +358,8 @@ touch:
 | `SHIELDNET_API_KEYS` | *(empty)* | Comma-separated list of allowed API keys. Empty = no key required (fine for local testing only) |
 | `SHIELDNET_DATA_DIR` | `./data` | Where cached feeds and local databases live |
 | `SHIELDNET_REPUTATION_NETWORK_ENABLED` | `true` | Turns tier1 lookups on/off |
-| `SHIELDNET_LIVE_FETCH_ENABLED` | `false` | Turns tier2/tier3 (actually visiting links) on/off |
-| `SHIELDNET_VISUAL_ANALYSIS_ENABLED` | `false` | Turns tier4 (screenshots) on/off |
+| `SHIELDNET_LIVE_FETCH_ENABLED` | `true` | Turns tier2/tier3 (actually visiting links) on/off |
+| `SHIELDNET_VISUAL_ANALYSIS_ENABLED` | `true` | Turns tier4 (screenshots) on/off |
 | `SHIELDNET_BLOCK_RISK_THRESHOLD` | `0.65` | Risk score above this → `block` |
 | `SHIELDNET_REVIEW_RISK_THRESHOLD` | `0.40` | Risk score above this → `review` |
 
@@ -337,9 +383,14 @@ This builds a container, runs it as a restricted, non-root user, and
 publishes the API only on `127.0.0.1:8000` (not exposed to the outside
 world by default). Data persists in a Docker volume between restarts.
 
-The image includes the screenshot-comparison browser by default, but —
-same as running locally — tier2/3/4 stay switched off until you enable
-their environment variables.
+The image includes the screenshot-comparison browser by default, and —
+same as running locally — all tiers are enabled by default. Set
+`SHIELDNET_LIVE_FETCH_ENABLED=false` / `SHIELDNET_VISUAL_ANALYSIS_ENABLED=false`
+in your `.env` if you want them off.
+
+`docker compose up --build` also starts the **`netguard`** service — the
+standalone traffic firewall (see [NetGuard](#netguard-the-standalone-traffic-firewall))
+— bound to the host network so it can manage `iptables`.
 
 ---
 
@@ -373,6 +424,28 @@ tradeoff.
   [README](integrations/browser_extension/README.md).
 - **SIEM output** (`integrations/siem/`) — formats scan results as JSON
   or CEF for feeding into security monitoring tools.
+- **NetGuard bridge** (`integrations/netguard_bridge.py`) — the reputation
+  cache + URL scanner backing the NetGuard proxy below.
+
+## NetGuard: the standalone traffic firewall
+
+Besides scanning one URL at a time, ShieldNet ships **NetGuard**, a
+standalone AI-powered transparent TCP proxy. It sits on your network,
+inspects each connection's hostname (SNI), TLS fingerprint (JA3), and
+flow features before the connection is relayed, and decides synchronously
+whether to allow or drop it — using the same trained URL model plus an
+Isolation Forest detector for anomalous flow behavior.
+
+```bash
+uv run shieldnet netguard --host 0.0.0.0 --port 8888
+```
+
+- Proxy: `:8888` (default) — transparent TCP interception
+- Dashboard: `:8080` — live connection stats and decisions
+- Uses `iptables` to enforce rules (runs as root; see the `netguard`
+  service in `docker-compose.yml` for a ready-to-run deployment)
+
+It has no Android/Shizuku/ADB dependency — it is a plain Linux service.
 
 ---
 
@@ -450,6 +523,8 @@ checks automatically on every push and pull request.
 | `shieldnet train` | Train and calibrate the model on real data |
 | `shieldnet scan URL` | Scan one URL |
 | `shieldnet test URL` | Same as `scan` |
+| `shieldnet explain URL` | Scan one URL and return a fully annotated report explaining every tier and the reasoning |
+| `shieldnet netguard` | Run the standalone AI-powered TCP proxy / traffic firewall |
 | `shieldnet serve` | Start the web API |
 | `shieldnet refresh-feeds` | Download the latest threat-intel feeds |
 | `shieldnet quantize` | Export a smaller/faster version of the model |
@@ -477,12 +552,15 @@ output isn't tracked in git — regenerate it locally with
 ├── api/                 The web service (FastAPI)
 ├── pipeline/            Ties everything together for one scan
 ├── ml_engine/           The AI model, feature extraction, and evidence checks
-├── integrations/        Browser extension + SIEM export
+├── netguard/            The standalone AI-powered TCP proxy / firewall
+├── integrations/        Browser extension + SIEM export + NetGuard bridge
 ├── tests/                Automated tests
 ├── scripts/              Setup and verification helpers
+├── requirements.txt      Pinned runtime dependencies (mirrors pyproject.toml)
 ├── Dockerfile / docker-compose.yml
 ├── BRAIN.md              Full project architecture, explained
-└── MODEL_BRAIN.md        The neural network's internals, explained
+├── MODEL_BRAIN.md        The neural network's internals, explained
+└── project.md            Working notes on the project
 ```
 
 See [BRAIN.md](BRAIN.md) for what every file and class in there is

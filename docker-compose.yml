@@ -2,8 +2,6 @@ services:
   shieldnet:
     build:
       context: .
-      args:
-        INSTALL_VISUAL: "1"
     init: true
     ports:
       - "127.0.0.1:8000:8000"
@@ -11,8 +9,8 @@ services:
       SHIELDNET_DATA_DIR: /app/data
       SHIELDNET_API_KEYS: ${SHIELDNET_API_KEYS:?set SHIELDNET_API_KEYS}
       SHIELDNET_REPUTATION_NETWORK_ENABLED: "true"
-      SHIELDNET_LIVE_FETCH_ENABLED: ${SHIELDNET_LIVE_FETCH_ENABLED:-false}
-      SHIELDNET_VISUAL_ANALYSIS_ENABLED: ${SHIELDNET_VISUAL_ANALYSIS_ENABLED:-false}
+      SHIELDNET_LIVE_FETCH_ENABLED: ${SHIELDNET_LIVE_FETCH_ENABLED:-true}
+      SHIELDNET_VISUAL_ANALYSIS_ENABLED: ${SHIELDNET_VISUAL_ANALYSIS_ENABLED:-true}
     volumes:
       - shieldnet-data:/app/data
     read_only: true
@@ -27,6 +25,30 @@ services:
     shm_size: 512mb
     restart: unless-stopped
 
+  netguard:
+    build:
+      context: .
+    init: true
+    network_mode: host
+    # Runs as root: iptables rule management (chain create/insert/DROP) needs
+    # it, even with NET_ADMIN/NET_RAW added - unlike the shieldnet API
+    # service, this one is a network appliance, not a sandboxed web service.
+    user: "0:0"
+    command: ["python", "main.py", "netguard", "--host", "0.0.0.0", "--dashboard-host", "0.0.0.0"]
+    environment:
+      SHIELDNET_DATA_DIR: /app/data
+    volumes:
+      - netguard-data:/app/data
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 2g
+    restart: unless-stopped
+
 volumes:
   shieldnet-data:
+  netguard-data:
 

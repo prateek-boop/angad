@@ -127,6 +127,14 @@ class EvidenceEnsemble:
                     {"safe": -0.35, "phishing": 0.3, "scam": 0.2},
                     "low",
                 )
+            elif age >= 365:
+                self._add(
+                    contributions,
+                    "reputation",
+                    "Domain has a long-standing registration history.",
+                    {"safe": 0.35},
+                    "info",
+                )
 
         if reputation.get("tls_expired") is True:
             self._add(
@@ -135,6 +143,14 @@ class EvidenceEnsemble:
                 "The site's TLS certificate is expired.",
                 {"safe": -0.5, "phishing": 0.35, "scam": 0.2},
                 "medium",
+            )
+        elif reputation.get("tls_issuer"):
+            self._add(
+                contributions,
+                "reputation",
+                "TLS certificate is valid and issued by a recognized CA.",
+                {"safe": 0.25},
+                "info",
             )
 
         redirects = redirects or {}
@@ -167,6 +183,14 @@ class EvidenceEnsemble:
                 "URL uses an unusually long redirect chain.",
                 {"safe": -0.4, "phishing": 0.3, "malware": 0.2},
                 "medium",
+            )
+        elif not redirects.get("blocked") and len(chain) == 1:
+            self._add(
+                contributions,
+                "redirect",
+                "URL does not redirect; the final destination is the submitted URL.",
+                {"safe": 0.15},
+                "info",
             )
 
         html = html or {}
@@ -224,6 +248,14 @@ class EvidenceEnsemble:
                 f"Page closely matches the {matched_brand} visual reference on another domain.",
                 {"safe": -4.0, "phishing": 4.8},
                 "critical",
+            )
+        elif matched_brand and domain_matches is True:
+            self._add(
+                contributions,
+                "visual",
+                f"Page visually matches the {matched_brand} reference on the expected domain.",
+                {"safe": 1.0},
+                "info",
             )
 
         logits = np.log(np.clip(base, _EPSILON, 1.0))

@@ -1,6 +1,5 @@
 FROM python:3.12-slim
 
-ARG INSTALL_VISUAL=0
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -10,12 +9,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY . /app
 
-RUN if [ "$INSTALL_VISUAL" = "1" ]; then \
-      python -m pip install ".[visual]" && \
-      python -m playwright install --with-deps chromium; \
-    else \
-      python -m pip install .; \
-    fi && \
+# iptables is needed by the netguard service (direct subprocess calls, no
+# Shizuku/ADB indirection) - harmless for the shieldnet API image.
+RUN apt-get update && apt-get install -y --no-install-recommends iptables \
+    && rm -rf /var/lib/apt/lists/*
+
+# Playwright is a base dependency (all five tiers run by default), so the
+# headless Chromium browser ships in every image.
+RUN python -m pip install . && \
+    python -m playwright install --with-deps chromium && \
     groupadd --system shieldnet && \
     useradd --system --gid shieldnet --home-dir /nonexistent shieldnet && \
     mkdir -p /app/data /tmp/shieldnet-home /opt/ms-playwright && \

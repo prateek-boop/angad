@@ -86,14 +86,14 @@ FETCH_TOTAL_TIMEOUT_S = _env_float("SHIELDNET_FETCH_TOTAL_TIMEOUT_S", 12)
 MAX_FETCH_BYTES = _env_int("SHIELDNET_MAX_FETCH_BYTES", 2 * 1024 * 1024)
 ALLOWED_SCHEMES = {"http", "https"}
 ALLOWED_FETCH_PORTS = {80, 443}
-LIVE_FETCH_ENABLED = _env_bool("SHIELDNET_LIVE_FETCH_ENABLED", False)
+LIVE_FETCH_ENABLED = _env_bool("SHIELDNET_LIVE_FETCH_ENABLED", True)
 
 # --- Tier 4: visual similarity -----------------------------------------------
 
 SCREENSHOT_TIMEOUT_S = 15
 SCREENSHOT_VIEWPORT = {"width": 1280, "height": 800}
 PHASH_DISTANCE_THRESHOLD = 10  # hamming distance below this = suspicious visual match
-VISUAL_ANALYSIS_ENABLED = _env_bool("SHIELDNET_VISUAL_ANALYSIS_ENABLED", False)
+VISUAL_ANALYSIS_ENABLED = _env_bool("SHIELDNET_VISUAL_ANALYSIS_ENABLED", True)
 
 # --- Tier 5: ensemble, calibration, feedback, drift, webhooks ---------------
 

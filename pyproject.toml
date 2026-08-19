@@ -10,9 +10,15 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.115,<1",
+  "flask>=2.0,<4",
+  "flask-socketio>=5.0,<6",
   "imagehash>=4.3,<5",
+  "joblib>=1.0,<2",
   "numpy>=2,<3",
+  "pandas>=1.3,<3",
   "pillow>=11,<13",
+  "playwright>=1.50,<2",
+  "psutil>=5.9,<7",
   "pydantic>=2.10,<3",
   "requests>=2.32,<3",
   "scikit-learn>=1.6,<2",
@@ -24,7 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-visual = ["playwright>=1.50,<2"]
+visual = []  # playwright is a base dependency; kept as an empty alias for compatibility
 dev = ["httpx>=0.28,<1", "pytest>=8,<10", "ruff>=0.6,<1"]
 
 [project.scripts]
@@ -34,11 +40,12 @@ shieldnet = "main:main"
 py-modules = ["config", "main"]
 
 [tool.setuptools.packages.find]
-include = ["api*", "ml_engine*", "pipeline*", "integrations*"]
+include = ["api*", "ml_engine*", "pipeline*", "integrations*", "netguard*"]
 
 [tool.setuptools.package-data]
 ml_engine = ["saved_model/*.keras", "saved_model/*.json"]
 "integrations.browser_extension" = ["*.json", "*.js", "*.html", "*.css", "*.md"]
+netguard = ["models/*.pkl", "models/*.h5", "dashboard/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -35,6 +35,16 @@ def cmd_scan(args) -> None:
     _print_json(result)
 
 
+def cmd_explain(args) -> None:
+    from pipeline.orchestrator import ScanOrchestrator
+    from pipeline.report import build_report
+
+    result = ScanOrchestrator(persist=not args.no_persist).scan(
+        args.url, depth="tier4", timeout_ms=args.timeout_ms
+    )
+    _print_json(build_report(result))
+
+
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
@@ -66,6 +76,18 @@ def cmd_serve(args) -> None:
         workers=args.workers,
         access_log=not args.no_access_log,
     )
+
+
+def cmd_netguard(args) -> None:
+    from netguard import constants as netguard_constants
+    from netguard.main import NetGuard
+
+    guard = NetGuard(db_path=args.db_path or netguard_constants.DB_PATH)
+    guard.proxy.host = args.host
+    guard.proxy.port = args.port
+    guard.dashboard.host = args.dashboard_host
+    guard.dashboard.port = args.dashboard_port
+    guard.start()
 
 
 def cmd_refresh_feeds(args) -> None:
@@ -195,6 +217,16 @@ def build_parser() -> argparse.ArgumentParser:
         scan_parser.add_argument("--no-persist", action="store_true")
         scan_parser.set_defaults(func=cmd_scan)
 
+    explain_parser = subparsers.add_parser(
+        "explain",
+        help="scan one URL and return a fully annotated report explaining "
+        "every tier's metadata and the phishing/legitimacy reasoning",
+    )
+    explain_parser.add_argument("url")
+    explain_parser.add_argument("--timeout-ms", type=int, default=None)
+    explain_parser.add_argument("--no-persist", action="store_true")
+    explain_parser.set_defaults(func=cmd_explain)
+
     serve_parser = subparsers.add_parser("serve", help="run the FastAPI service")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
@@ -202,6 +234,16 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--reload", action="store_true")
     serve_parser.add_argument("--no-access-log", action="store_true")
     serve_parser.set_defaults(func=cmd_serve)
+
+    netguard_parser = subparsers.add_parser(
+        "netguard", help="run the standalone TCP proxy / traffic firewall"
+    )
+    netguard_parser.add_argument("--host", default="127.0.0.1", help="proxy listen host")
+    netguard_parser.add_argument("--port", type=int, default=8888, help="proxy listen port")
+    netguard_parser.add_argument("--dashboard-host", default="0.0.0.0")
+    netguard_parser.add_argument("--dashboard-port", type=int, default=8080)
+    netguard_parser.add_argument("--db-path", default=None)
+    netguard_parser.set_defaults(func=cmd_netguard)
 
     feeds_parser = subparsers.add_parser(
         "refresh-feeds", help="download and validate intelligence feeds"

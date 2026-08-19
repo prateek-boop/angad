@@ -14,8 +14,8 @@ else
   uv sync --extra dev --python 3.12
 fi
 
-if [[ "$visual" == "1" ]]; then
-  uv run playwright install chromium
-fi
+# Playwright is a base dependency now (all five tiers run by default),
+# so the headless Chromium browser is installed unconditionally.
+uv run playwright install chromium
 
 printf 'ShieldNet environment ready. Run: uv run shieldnet serve\n'
