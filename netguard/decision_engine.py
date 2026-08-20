@@ -4,6 +4,7 @@ Fuses AI verdicts with behavioral baselines for final decision
 """
 
 import logging
+import threading
 import time
 from typing import Dict, Tuple, Optional
 
@@ -45,6 +46,7 @@ class DecisionEngine:
         # In-memory strike tracking (also persisted to DB)
         self._strikes: Dict[int, int] = {}
         self._last_decay: float = time.time()
+        self._strike_lock = threading.RLock()
         
         self.logger.info("⚖️ Decision Engine initialized")
     
@@ -95,10 +97,10 @@ class DecisionEngine:
             )
         
         # === DECISION LOGIC ===
-        
+
         action = "ALLOW"
         reason = ""
-        
+
         # 1. Safe traffic - immediate allow
         if adjusted_risk < self.safe_threshold:
             if "SAFE" in classification or classification in ("NORMAL", "SYSTEM_APP", "LOCALHOST"):
@@ -107,24 +109,55 @@ class DecisionEngine:
             else:
                 action = "ALLOW"
                 reason = f"Low risk ({adjusted_risk:.2f})"
-        
-        # 2. Critical threat - immediate block
+
+        # 2. Critical threat - immediate block.
+        # Corroboration requirement: a high risk score only hard-blocks when
+        # backed by a deterministic signature (JA3 / DB threat match) or by
+        # at least TWO independent signal sources. URL lexical rules are
+        # grouped with the URL model and anomaly output is monitoring-only.
+        # A single ML model firing alone can never hard-block a connection.
+        # It is downgraded to a warning so legitimate traffic survives a false positive.
         elif adjusted_risk >= self.instant_block_threshold:
-            action = "BLOCK"
-            reason = f"Critical threat: {classification} (risk: {adjusted_risk:.2f})"
-            self.logger.critical(f"🚨 CRITICAL BLOCK: UID {uid} - {reason}")
+            sources = self._signal_sources(verdict)
+            has_deterministic = self._has_deterministic_evidence(verdict)
+            if has_deterministic or len(sources) >= 2:
+                action = "BLOCK"
+                reason = f"Critical threat: {classification} (risk: {adjusted_risk:.2f})"
+                self.logger.critical(f"🚨 CRITICAL BLOCK: UID {uid} - {reason}")
+            else:
+                action = "WARN"
+                reason = (
+                    f"Single-signal high risk ({adjusted_risk:.2f}): {classification} "
+                    f"[source={'+'.join(sources) or 'unknown'}] — needs corroboration to block"
+                )
+                self.logger.warning(f"⚠️ CORROBORATION HOLD: UID {uid} - {reason}")
         
         # 3. High risk - check strikes
         elif adjusted_risk >= self.warn_threshold:
+            sources = self._signal_sources(verdict)
+            has_deterministic = self._has_deterministic_evidence(verdict)
+            single_signal = not has_deterministic and len(sources) < 2
             current_strikes = self._get_strikes(uid)
-            
-            if current_strikes >= self.strike_limit:
+
+            if single_signal:
+                # Do not let unrelated historical strikes turn today's
+                # model-only false positive into a block.
+                action = "ALLOW"
+                reason = (
+                    f"Single-signal ({adjusted_risk:.2f}): monitoring only "
+                    f"[{'+'.join(sources) or 'unknown'}]"
+                )
+                self.logger.warning(
+                    "⚠️ CORROBORATION HOLD: UID %s - %s (no strike)",
+                    uid,
+                    classification,
+                )
+            elif current_strikes >= self.strike_limit:
                 # Too many warnings, upgrade to block
                 action = "BLOCK"
                 reason = f"Strike limit reached ({current_strikes}/{self.strike_limit}): {classification}"
                 self.logger.warning(f"⛔ STRIKE BLOCK: UID {uid} - {reason}")
             else:
-                # Issue warning and add strike
                 action = "WARN"
                 new_strikes = self._add_strike(uid)
                 reason = f"Suspicious ({classification}): Strike {new_strikes}/{self.strike_limit}"
@@ -144,50 +177,110 @@ class DecisionEngine:
         # === UPDATE PROFILE ===
 
         if conn:
-            self.profiler.update_profile(
-                uid=uid,
-                conn=conn,
-                verdict={**verdict, "action": action, "adjusted_risk": adjusted_risk},
-                package_name=package_name
-            )
+            try:
+                self.profiler.update_profile(
+                    uid=uid,
+                    conn=conn,
+                    verdict={**verdict, "risk_score": adjusted_risk, "action": action,
+                             "adjusted_risk": adjusted_risk},
+                    package_name=package_name
+                )
+            except Exception as e:
+                self.logger.error("Profile update failed for %s: %s", uid, e)
         
         # === LOG CONNECTION ===
         
         if self.db and conn:
-            self.db.log_connection(
-                uid=uid,
-                dst_ip=conn.get("dst_ip", ""),
-                dst_port=conn.get("dst_port", 0),
-                sni=conn.get("sni", ""),
-                risk_score=adjusted_risk,
-                action=action,
-                classification=classification
-            )
+            try:
+                self.db.log_connection(
+                    uid=uid,
+                    dst_ip=conn.get("dst_ip", ""),
+                    dst_port=conn.get("dst_port", 0),
+                    sni=conn.get("sni", ""),
+                    risk_score=adjusted_risk,
+                    action=action,
+                    classification=classification
+                )
+            except Exception as e:
+                self.logger.error("Connection log failed for %s: %s", uid, e)
         
         return action, reason
     
+    def _signal_sources(self, verdict: Dict) -> set:
+        """
+        Count independent evidence sources behind a verdict.
+
+        A verdict may carry multiple reasons; they are grouped into
+        detectors so that (e.g.) a TLD rule firing alongside an entropy
+        rule is still one source (the rule engine), not two.
+
+        Returns a set of source names; the decision engine hard-blocks on
+        high risk only when the set has >= 2 entries or a deterministic
+        signature is present.
+        """
+        reasons = set(verdict.get("reasons", []))
+        sources = set()
+
+        if any(r.startswith("shieldnet_") for r in reasons):
+            # URL-model output and URL lexical rules inspect the same object and
+            # are correlated. Count them as one source, never as corroboration.
+            sources.add("url_lexical")
+        if "supervised_payload_model" in reasons:
+            sources.add("payload_classifier")
+        url_reasons = {
+            "high_entropy_dga",
+            "elevated_entropy",
+            "risky_tld",
+            "high_entropy",
+            "dga_pattern",
+        }
+        if reasons & url_reasons:
+            sources.add("url_lexical")
+        network_reasons = {
+            "suspicious_port",
+            "exfiltration_pattern",
+            "high_port",
+            "unusual_time",
+        }
+        if reasons & network_reasons:
+            sources.add("network_behavior")
+        if (
+            verdict.get("payload_attack_probability", 0) >= 0.65
+            and "payload_classifier" not in sources
+        ):
+            sources.add("payload_classifier")
+
+        return sources
+
+    @staticmethod
+    def _has_deterministic_evidence(verdict: Dict) -> bool:
+        reasons = verdict.get("reasons", [])
+        return any(
+            reason.startswith(("ja3_match:", "ja3_db_match:", "shieldnet_verified_"))
+            or reason == "db_signature_match"
+            for reason in reasons
+        )
+
     def _get_strikes(self, uid: str) -> int:
         """Get current strike count for UID"""
-        if uid in self._strikes:
-            return self._strikes[uid]
-        
-        # Check database
-        if self.db:
-            return self.db.get_strike_count(uid)
-        
-        return 0
+        with self._strike_lock:
+            if uid in self._strikes:
+                return self._strikes[uid]
+            if self.db:
+                count = self.db.get_strike_count(uid)
+                self._strikes[uid] = count
+                return count
+            return 0
     
     def _add_strike(self, uid: str) -> int:
         """Add a strike and return new count"""
-        current = self._get_strikes(uid)
-        new_count = current + 1
-        self._strikes[uid] = new_count
-        
-        # Persist to database
-        if self.db:
-            self.db.add_strike(uid)
-        
-        return new_count
+        with self._strike_lock:
+            if self.db:
+                new_count = self.db.add_strike(uid)
+            else:
+                new_count = self._strikes.get(uid, 0) + 1
+            self._strikes[uid] = new_count
+            return new_count
     
     def _decay_strikes(self):
         """
@@ -200,20 +293,19 @@ class DecisionEngine:
         if now - self._last_decay < decay_interval:
             return
         
-        self._last_decay = now
-        
-        # Decay all strikes by 1
-        for uid in list(self._strikes.keys()):
-            if self._strikes[uid] > 0:
-                self._strikes[uid] -= 1
-                if self._strikes[uid] == 0:
-                    del self._strikes[uid]
+        with self._strike_lock:
+            self._last_decay = now
+            for uid in list(self._strikes.keys()):
+                self._strikes[uid] = max(0, self._strikes[uid] - 1)
+            if self.db:
+                self.db.decay_strikes()
         
         self.logger.debug("🔄 Strike decay applied")
     
     def reset_strikes(self, uid: str):
         """Manually reset strikes for an app"""
-        self._strikes.pop(uid, None)
+        with self._strike_lock:
+            self._strikes.pop(uid, None)
         if self.db:
             self.db.reset_strikes(uid)
         self.logger.info(f"✅ Strikes reset for UID {uid}")

@@ -33,11 +33,20 @@ def run(args: list[str], timeout: int = 5) -> tuple[int, str, str]:
         return (-1, "", str(e))
 
 
-def run_iptables(args: list[str], timeout: int = 5) -> tuple[int, str, str]:
-    """Run iptables with an operation allowlist, mirroring the old Shizuku validation."""
+def _run_xtables(binary: str, args: list[str], timeout: int) -> tuple[int, str, str]:
     if not any(op in args for op in _ALLOWED_IPTABLES_OPS):
         return (-1, "", "Invalid iptables operation")
-    return run([constants.IPTABLES_BIN, *args], timeout=timeout)
+    return run([binary, *args], timeout=timeout)
+
+
+def run_iptables(args: list[str], timeout: int = 5) -> tuple[int, str, str]:
+    """Run IPv4 iptables with an operation allowlist."""
+    return _run_xtables(constants.IPTABLES_BIN, args, timeout)
+
+
+def run_ip6tables(args: list[str], timeout: int = 5) -> tuple[int, str, str]:
+    """Run IPv6 iptables with an operation allowlist."""
+    return _run_xtables(constants.IP6TABLES_BIN, args, timeout)
 
 
 def run_ss(args: list[str] = ("-ntup",), timeout: int = 5) -> tuple[int, str, str]:

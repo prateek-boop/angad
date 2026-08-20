@@ -82,12 +82,48 @@ def cmd_netguard(args) -> None:
     from netguard import constants as netguard_constants
     from netguard.main import NetGuard
 
-    guard = NetGuard(db_path=args.db_path or netguard_constants.DB_PATH)
+    guard = NetGuard(
+        db_path=args.db_path or netguard_constants.DB_PATH,
+        collect_normal=args.collect_normal,
+    )
     guard.proxy.host = args.host
+    guard.proxy.host_v6 = args.host_v6
     guard.proxy.port = args.port
     guard.dashboard.host = args.dashboard_host
     guard.dashboard.port = args.dashboard_port
     guard.start()
+
+
+def cmd_netguard_train_normal(args) -> None:
+    from netguard.database import ReputationDB
+    from netguard.isolation_forest import IsolationForestDetector
+
+    db = ReputationDB(args.db_path)
+    samples = db.get_normal_traffic_samples()
+    required_samples = max(args.min_samples, 100)
+    if len(samples) < required_samples:
+        raise SystemExit(
+            f"need at least {required_samples} normal samples; found {len(samples)}"
+        )
+
+    detector = IsolationForestDetector(model_path=args.output)
+    detector.train(samples)
+    _print_json({"output": args.output, **detector.get_stats()})
+
+
+def cmd_netguard_train_payload(args) -> None:
+    from netguard.payload_model import train_iot23_payload_model
+
+    datasets = list(zip(args.pcap, args.labels))
+    _print_json(train_iot23_payload_model(datasets, args.output))
+
+
+def cmd_netguard_train_deep_payload(args) -> None:
+    """Compatibility command for the packaged Keras payload classifier."""
+    from netguard.payload_model import train_deep_payload_model
+
+    datasets = list(zip(args.pcap, args.labels))
+    _print_json(train_deep_payload_model(datasets, args.output))
 
 
 def cmd_refresh_feeds(args) -> None:
@@ -239,11 +275,57 @@ def build_parser() -> argparse.ArgumentParser:
         "netguard", help="run the standalone TCP proxy / traffic firewall"
     )
     netguard_parser.add_argument("--host", default="127.0.0.1", help="proxy listen host")
+    netguard_parser.add_argument("--host-v6", default="::1", help="IPv6 proxy listen host")
     netguard_parser.add_argument("--port", type=int, default=8888, help="proxy listen port")
-    netguard_parser.add_argument("--dashboard-host", default="0.0.0.0")
+    netguard_parser.add_argument("--dashboard-host", default="127.0.0.1")
     netguard_parser.add_argument("--dashboard-port", type=int, default=8080)
     netguard_parser.add_argument("--db-path", default=None)
+    netguard_parser.add_argument(
+        "--collect-normal",
+        action="store_true",
+        help="save low-risk allowed traffic as known-normal training samples",
+    )
     netguard_parser.set_defaults(func=cmd_netguard)
+
+    netguard_train_parser = subparsers.add_parser(
+        "netguard-train-normal", help="train NetGuard anomaly detection from collected normal traffic"
+    )
+    netguard_train_parser.add_argument("--db-path", required=True)
+    netguard_train_parser.add_argument(
+        "--output", default="netguard/models/isolation_forest.pkl"
+    )
+    netguard_train_parser.add_argument("--min-samples", type=int, default=100)
+    netguard_train_parser.set_defaults(func=cmd_netguard_train_normal)
+
+    payload_train_parser = subparsers.add_parser(
+        "netguard-train-payload",
+        help="train the pre-relay payload classifier from an IoT-23 capture",
+    )
+    payload_train_parser.add_argument(
+        "--pcap", required=True, action="append", help="IoT-23 pcap (repeatable)"
+    )
+    payload_train_parser.add_argument(
+        "--labels", required=True, action="append", help="IoT-23 conn.log.labeled (repeatable)"
+    )
+    payload_train_parser.add_argument(
+        "--output", default="netguard/models/payload_classifier.pkl"
+    )
+    payload_train_parser.set_defaults(func=cmd_netguard_train_payload)
+
+    deep_payload_train_parser = subparsers.add_parser(
+        "netguard-train-deep-payload",
+        help="train the compact Keras payload classifier from IoT-23 captures",
+    )
+    deep_payload_train_parser.add_argument(
+        "--pcap", required=True, action="append", help="IoT-23 pcap (repeatable)"
+    )
+    deep_payload_train_parser.add_argument(
+        "--labels", required=True, action="append", help="IoT-23 conn.log.labeled (repeatable)"
+    )
+    deep_payload_train_parser.add_argument(
+        "--output", default="netguard/models/deep_classifier_payload.h5"
+    )
+    deep_payload_train_parser.set_defaults(func=cmd_netguard_train_deep_payload)
 
     feeds_parser = subparsers.add_parser(
         "refresh-feeds", help="download and validate intelligence feeds"

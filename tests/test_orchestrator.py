@@ -52,6 +52,24 @@ def test_tier0_scan_preserves_contract():
     assert result["scan_id"]
 
 
+def test_tier0_model_only_threat_requires_review_instead_of_blocking():
+    threat = {
+        "safe": 0.001,
+        "phishing": 0.995,
+        "malware": 0.001,
+        "data_leak": 0.001,
+        "scam": 0.002,
+    }
+    result = _orchestrator(model=FakeModel(threat)).scan(
+        "https://ordinary.example/path", depth="tier0"
+    )
+
+    assert result["category"] == "phishing"
+    assert result["risk_score"] > config.BLOCK_RISK_THRESHOLD
+    assert result["decision"] == "review"
+    assert result["blocked"] is False
+
+
 def test_exact_blocklist_hit_overrides_safe_model():
     reputation = FakeReputation({"domain_age_days": 1, "blocklist_hit": "urlhaus"})
     result = _orchestrator(reputation_checker=reputation).scan(

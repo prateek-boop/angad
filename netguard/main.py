@@ -9,6 +9,8 @@ connection is relayed - not after the fact via kernel rule races.
 """
 
 import logging
+import signal
+import threading
 import time
 
 from integrations.netguard_bridge import UrlReputationBridge
@@ -56,9 +58,10 @@ class NetGuard:
         guard.stop()
     """
 
-    def __init__(self, db_path: str = constants.DB_PATH):
+    def __init__(self, db_path: str = constants.DB_PATH, collect_normal: bool = False):
         self.logger = logging.getLogger("NETGUARD")
         self.is_running = False
+        self.collect_normal = collect_normal
 
         self.logger.info("🚀 Initializing NetGuard...")
 
@@ -74,22 +77,40 @@ class NetGuard:
         self.decision_engine = DecisionEngine(self.db)
         self.enforcer = EnforcementEngine()
         self.dashboard = DashboardServer()
+        self.dashboard.set_status_provider(self.get_stats)
         self.url_reputation = UrlReputationBridge()
+        self.logger.info("✅ ShieldNet URL classifier loaded for domain reputation")
+        if self.collect_normal:
+            self.logger.warning(
+                "Normal-traffic collection enabled; only low-risk allowed connections will be saved"
+            )
 
         self.proxy.set_tls_callback(self._on_tls_metadata)
         self.proxy.set_block_check(self._check_connection)
-
-        # TLS metadata cache (populated by proxy callback, keyed by dest)
-        self._tls_cache = {}
+        self.proxy.set_traffic_callback(self._on_traffic)
 
         self.logger.info("✅ NetGuard initialized")
 
     def _on_tls_metadata(self, metadata: dict):
         """Callback when proxy extracts TLS metadata"""
-        if metadata.get("original_dst"):
-            dst_ip, dst_port = metadata["original_dst"]
-            key = f"{dst_ip}:{dst_port}"
-            self._tls_cache[key] = metadata
+        self.logger.debug("TLS metadata extracted for %s", metadata.get("sni") or "unknown")
+
+    def _on_traffic(self, conn_info: dict, tx_bytes: int, rx_bytes: int):
+        """Feed real proxy relay byte counts into the flow tracker."""
+        self.flow_tracker.update_flow(self._flow_connection(conn_info), tx_bytes, rx_bytes)
+
+    @staticmethod
+    def _flow_connection(conn_info: dict) -> dict:
+        client_ip = conn_info["client_ip"]
+        return {
+            "uid": client_ip,
+            "src_ip": client_ip,
+            "src_port": conn_info.get("client_port", 0),
+            "dst_ip": conn_info.get("dst_ip", ""),
+            "dst_port": conn_info.get("dst_port", 0),
+            "protocol": conn_info.get("protocol", "TCP"),
+            "is_system": False,
+        }
 
     def start(self):
         """
@@ -98,20 +119,40 @@ class NetGuard:
         """
         self.logger.info("🔥 Starting NetGuard Engine...")
 
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, lambda *_: setattr(self, "is_running", False))
+
         if not self.observer.start_listening():
             self.logger.error("❌ Failed to start observer")
             return
 
-        self.proxy.start()
-        self.enforcer.initialize_chains()
-        self.dashboard.start()
+        if not self.proxy.start():
+            self.logger.error("❌ Failed to start transparent proxy")
+            self.observer.stop()
+            return
+
+        if not self.enforcer.initialize_chains():
+            self.logger.error("❌ Failed to initialize enforcement")
+            self.proxy.stop()
+            self.observer.stop()
+            return
+
+        if not self.dashboard.start():
+            self.logger.error("❌ Failed to start dashboard")
+            self.enforcer.stop()
+            self.proxy.stop()
+            self.observer.stop()
+            return
 
         self.is_running = True
 
         self.logger.info("=" * 60)
         self.logger.info("🛡️  NETGUARD - ACTIVE")
         self.logger.info(f"📊 Dashboard: http://localhost:{self.dashboard.port}")
-        self.logger.info(f"🛰️  Proxy: {self.proxy.host}:{self.proxy.port}")
+        self.logger.info(
+            f"🛰️  Proxy: {self.proxy.host}:{self.proxy.port}, "
+            f"[{self.proxy.host_v6}]:{self.proxy.port}"
+        )
         self.logger.info("=" * 60)
 
         try:
@@ -133,6 +174,7 @@ class NetGuard:
 
         self.observer.stop()
         self.proxy.stop()
+        self.enforcer.stop()
 
         self.logger.info("✅ NetGuard stopped")
 
@@ -189,32 +231,29 @@ class NetGuard:
             "sni": sni,
             "ja3": conn_info.get("ja3", ""),
             "tls_version": conn_info.get("tls_version", ""),
+            "cipher_count": conn_info.get("cipher_count", 0),
+            "extension_count": conn_info.get("extension_count", 0),
         }
         # No Android PackageManager on a standalone deployment - see
         # FeatureExtractor._extract_app_features.
         app_metadata = {}
 
-        flow_conn = {
-            "uid": client_ip,
-            "src_ip": client_ip,
-            "src_port": conn_info.get("client_port", 0),
-            "dst_ip": dst_ip,
-            "dst_port": conn_info.get("dst_port", 0),
-            "protocol": conn_info.get("protocol", "TCP"),
-            "is_system": False,
-        }
+        flow_conn = self._flow_connection(conn_info)
 
         features = self.extractor.extract_features(
             flow_conn, tls_metadata=tls_metadata, app_metadata=app_metadata
         )
 
-        url_reputation = self.url_reputation.check_domain(sni) if sni else None
+        url_reputation = None
+        if sni:
+            url_reputation = self.url_reputation.check_domain(sni)
 
         verdict = self.ai_engine.analyze(
             features,
             tls_metadata=tls_metadata,
             app_metadata=app_metadata,
             url_reputation=url_reputation,
+            initial_payload=conn_info.get("initial_payload", b""),
         )
 
         action, reason = self.decision_engine.evaluate_verdict(
@@ -224,11 +263,29 @@ class NetGuard:
             package_name=f"client:{client_ip}",
         )
 
-        self.dashboard.emit_verdict(client_ip, verdict, action)
+        if (
+            getattr(self, "collect_normal", False)
+            and action == "ALLOW"
+            and verdict["risk_score"] < constants.SAFE_THRESHOLD
+        ):
+            self.db.add_normal_traffic_sample(features, client_ip=client_ip, sni=sni)
+
+        try:
+            self.dashboard.emit_verdict(
+                client_ip,
+                verdict,
+                action,
+                reason=reason,
+                features=features,
+                feature_names=self.extractor.get_feature_names(),
+                connection={**flow_conn, "sni": sni},
+            )
+        except Exception as e:
+            # Telemetry must never alter an already-made security decision.
+            self.logger.error("Dashboard event failed: %s", e)
 
         target = sni or dst_ip
         if action == "BLOCK":
-            self.enforcer.block_client(client_ip, reason=reason)
             self.logger.warning(
                 f"🚫 BLOCKED: {client_ip} → {target} "
                 f"({verdict['classification']}, risk={verdict['risk_score']:.2f})"
@@ -249,6 +306,15 @@ class NetGuard:
             "proxy": self.proxy.get_stats(),
             "flow_tracker": self.flow_tracker.get_stats(),
             "ai_engine": self.ai_engine.get_stats(),
+            "url_reputation": {
+                "model_available": self.url_reputation.orchestrator.model is not None,
+                "policy": "model_output_requires_independent_enforcement_evidence",
+                **self.url_reputation.get_stats(),
+            },
+            "normal_training": {
+                "collection_enabled": self.collect_normal,
+                "samples": self.db.count_normal_traffic_samples(),
+            },
             "decision_engine": self.decision_engine.get_stats(),
             "enforcer": self.enforcer.get_stats(),
         }

@@ -118,10 +118,8 @@ class NetlinkParser:
             else:
                 return None
             
-            # Parse remaining fields (after sockid, at offset 48)
-            # idiag_if (4) + idiag_cookie (8) = 12 bytes in sockid after addresses
-            # Then: expires(4) + rqueue(4) + wqueue(4) + uid(4) + inode(4)
-            offset = 48 + 12  # After sockid
+            # Header (4) + inet_diag_sockid (48), followed by five u32 fields.
+            offset = 52
             expires, rqueue, wqueue, uid, inode = struct.unpack("IIIII", data[offset:offset+20])
             
             return NetlinkSocket(

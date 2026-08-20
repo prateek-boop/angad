@@ -8,6 +8,8 @@ services:
     environment:
       SHIELDNET_DATA_DIR: /app/data
       SHIELDNET_API_KEYS: ${SHIELDNET_API_KEYS:?set SHIELDNET_API_KEYS}
+      CUDA_VISIBLE_DEVICES: "-1"
+      TF_CPP_MIN_LOG_LEVEL: "2"
       SHIELDNET_REPUTATION_NETWORK_ENABLED: "true"
       SHIELDNET_LIVE_FETCH_ENABLED: ${SHIELDNET_LIVE_FETCH_ENABLED:-true}
       SHIELDNET_VISUAL_ANALYSIS_ENABLED: ${SHIELDNET_VISUAL_ANALYSIS_ENABLED:-true}
@@ -26,17 +28,23 @@ services:
     restart: unless-stopped
 
   netguard:
+    profiles: ["netguard"]
     build:
       context: .
     init: true
     network_mode: host
     # Runs as root: iptables rule management (chain create/insert/DROP) needs
     # it, even with NET_ADMIN/NET_RAW added - unlike the shieldnet API
-    # service, this one is a network appliance, not a sandboxed web service.
+    # service, this host-local firewall is not a sandboxed web service.
     user: "0:0"
-    command: ["python", "main.py", "netguard", "--host", "0.0.0.0", "--dashboard-host", "0.0.0.0"]
+    command: ["python", "main.py", "netguard", "--host", "127.0.0.1", "--dashboard-host", "127.0.0.1", "--db-path", "/app/data/netguard_reputation.db"]
     environment:
       SHIELDNET_DATA_DIR: /app/data
+      SHIELDNET_REPUTATION_NETWORK_ENABLED: "false"
+      SHIELDNET_LIVE_FETCH_ENABLED: "false"
+      SHIELDNET_VISUAL_ANALYSIS_ENABLED: "false"
+      CUDA_VISIBLE_DEVICES: "-1"
+      TF_CPP_MIN_LOG_LEVEL: "2"
     volumes:
       - netguard-data:/app/data
     cap_add:
@@ -46,9 +54,15 @@ services:
       - no-new-privileges:true
     pids_limit: 512
     mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/status', timeout=3)); raise SystemExit(data.get('status') != 'online')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 20s
     restart: unless-stopped
 
 volumes:
   shieldnet-data:
   netguard-data:
-

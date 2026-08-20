@@ -96,6 +96,9 @@ class TLSParser:
             return None
         
         handshake_length = struct.unpack("!I", b'\x00' + handshake[1:4])[0]
+        if handshake_length + 4 > len(handshake):
+            return None
+        handshake = handshake[:handshake_length + 4]
         
         # ClientHello structure
         # [Version:2][Random:32][SessionIDLen:1][SessionID:var][CipherSuitesLen:2][CipherSuites:var]
@@ -110,24 +113,29 @@ class TLSParser:
         pos += 2
         
         # Random (32 bytes)
+        if pos + 32 > len(handshake):
+            return None
         pos += 32
         
         # Session ID
         if pos + 1 > len(handshake):
             return None
         session_id_len = handshake[pos]
-        pos += 1 + session_id_len
+        pos += 1
+        if pos + session_id_len > len(handshake):
+            return None
+        pos += session_id_len
         
         # Cipher Suites
         if pos + 2 > len(handshake):
             return None
         cipher_suites_len = struct.unpack("!H", handshake[pos:pos+2])[0]
         pos += 2
+        if cipher_suites_len % 2 or pos + cipher_suites_len > len(handshake):
+            return None
         
         cipher_suites = []
         for i in range(0, cipher_suites_len, 2):
-            if pos + 2 > len(handshake):
-                break
             cs = struct.unpack("!H", handshake[pos:pos+2])[0]
             pos += 2
             if cs not in GREASE_VALUES:
@@ -137,7 +145,10 @@ class TLSParser:
         if pos + 1 > len(handshake):
             return None
         compression_len = handshake[pos]
-        pos += 1 + compression_len
+        pos += 1
+        if pos + compression_len > len(handshake):
+            return None
+        pos += compression_len
         
         # Extensions
         extensions = []
@@ -151,11 +162,15 @@ class TLSParser:
             pos += 2
             
             ext_end = pos + extensions_len
+            if ext_end != len(handshake):
+                return None
             
             while pos + 4 <= ext_end and pos + 4 <= len(handshake):
                 ext_type = struct.unpack("!H", handshake[pos:pos+2])[0]
                 ext_len = struct.unpack("!H", handshake[pos+2:pos+4])[0]
                 pos += 4
+                if pos + ext_len > ext_end:
+                    return None
                 
                 ext_data = handshake[pos:pos+ext_len]
                 pos += ext_len
@@ -206,15 +221,21 @@ class TLSParser:
             if len(data) < 5:
                 return None
             
-            # SNI List Length (2 bytes)
             list_len = struct.unpack("!H", data[0:2])[0]
+            if list_len != len(data) - 2:
+                return None
             
             # SNI Entry: [Type:1][Length:2][Name:var]
             name_type = data[2]
             name_len = struct.unpack("!H", data[3:5])[0]
-            
+            if name_len == 0 or 5 + name_len != len(data):
+                return None
+
             if name_type == 0:  # host_name
-                return data[5:5+name_len].decode('ascii', errors='ignore')
+                hostname = data[5:5+name_len].decode('ascii')
+                if any(not label or len(label) > 63 for label in hostname.split('.')):
+                    return None
+                return hostname.lower().rstrip('.')
             
             return None
         except:
@@ -300,26 +321,8 @@ class TLSParser:
         Quick extraction of just SNI without full parsing.
         More efficient for high-throughput scenarios.
         """
-        try:
-            # Verify TLS handshake
-            if len(data) < 6 or data[0] != TLS_RECORD_HANDSHAKE:
-                return None
-            
-            # Search for SNI extension pattern
-            # Extension type 0x0000 followed by SNI data
-            pos = 0
-            while pos < len(data) - 10:
-                # Look for extension type 0x0000 (SNI)
-                if data[pos:pos+2] == b'\x00\x00':
-                    ext_len = struct.unpack("!H", data[pos+2:pos+4])[0]
-                    if pos + 4 + ext_len <= len(data):
-                        sni_data = data[pos+4:pos+4+ext_len]
-                        return self._parse_sni_extension(sni_data)
-                pos += 1
-            
-            return None
-        except:
-            return None
+        hello = self.parse_client_hello(data)
+        return hello.sni if hello else None
     
     def get_ja3_from_hello(self, data: bytes) -> Optional[str]:
         """Extract just JA3 hash from ClientHello"""

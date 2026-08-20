@@ -4,10 +4,13 @@ Tier 1 fast anomaly detection for zero-day threat identification
 """
 
 import logging
-import numpy as np
-from typing import List, Dict, Tuple, Optional
-import pickle
+import math
 import os
+import pickle
+
+import numpy as np
+
+from .constants import FEATURE_COUNT, FEATURE_SCHEMA
 
 try:
     from sklearn.ensemble import IsolationForest
@@ -32,27 +35,26 @@ class IsolationForestDetector:
     
     def __init__(self, model_path: str = None):
         self.logger = logging.getLogger("ISOLATION_FOREST")
-        
-        # Try multiple paths to find the model
-        possible_paths = [
-            model_path,
-            os.path.join(os.path.dirname(__file__), "models/isolation_forest.pkl"),
-            "models/isolation_forest.pkl",
-            "isolation_forest.pkl",
-        ]
 
-        self.model_path = None
-        for path in possible_paths:
-            if path and os.path.exists(path):
-                self.model_path = path
-                break
+        if model_path:
+            # An explicit output path must not fall back to and overwrite an
+            # unrelated auto-discovered artifact when it does not exist yet.
+            self.model_path = model_path
+        else:
+            possible_paths = [
+                os.path.join(os.path.dirname(__file__), "models/isolation_forest.pkl"),
+                "models/isolation_forest.pkl",
+                "isolation_forest.pkl",
+            ]
+            self.model_path = next(
+                (path for path in possible_paths if os.path.exists(path)),
+                possible_paths[0],
+            )
 
-        if not self.model_path:
-            self.model_path = os.path.join(os.path.dirname(__file__), "models/isolation_forest.pkl")
-        
-        self.model: Optional['IsolationForest'] = None
-        self.scaler: Optional['StandardScaler'] = None
+        self.model: IsolationForest | None = None
+        self.scaler: StandardScaler | None = None
         self.is_trained = False
+        self.training_samples = 0
         
         # Feature indices that matter most for anomaly detection
         # Focus on behavioral features, not categorical
@@ -61,10 +63,10 @@ class IsolationForestDetector:
             4,   # Digit ratio
             6,   # TLD risk
             7,   # Max consonants
-            13,  # Bytes/sec
-            14,  # Packets/sec
-            15,  # TX/RX ratio
-            19,  # Flow anomaly score
+            14,  # Bytes/sec
+            15,  # Packets/sec
+            16,  # TX/RX ratio
+            20,  # Flow anomaly score
             36,  # Hour
             41,  # Temporal anomaly
         ]
@@ -80,14 +82,43 @@ class IsolationForestDetector:
             try:
                 with open(self.model_path, 'rb') as f:
                     saved = pickle.load(f)
-                    self.model = saved['model']
-                    self.scaler = saved['scaler']
-                    # Load key features if saved (for compatibility with train_model.py)
-                    if 'key_features' in saved:
-                        self.key_features = saved['key_features']
+                    if not isinstance(saved, dict):
+                        raise ValueError("model artifact must be a dictionary")
+                    if saved.get('artifact_format') != 'netguard-isolation-forest-v1':
+                        raise ValueError("model artifact format does not match NetGuard")
+                    if saved.get('feature_schema') != FEATURE_SCHEMA:
+                        raise ValueError("model feature schema does not match NetGuard")
+                    if saved.get('n_features') != FEATURE_COUNT:
+                        raise ValueError("model feature count does not match NetGuard")
+                    key_features = saved.get('key_features')
+                    if (
+                        not isinstance(key_features, list)
+                        or not key_features
+                        or len(set(key_features)) != len(key_features)
+                        or any(
+                            not isinstance(index, int) or not 0 <= index < FEATURE_COUNT
+                            for index in key_features
+                        )
+                    ):
+                        raise ValueError("model key feature indices are invalid")
+                    model = saved['model']
+                    scaler = saved['scaler']
+                    if int(getattr(model, 'n_features_in_', 0)) != len(key_features):
+                        raise ValueError("model input width does not match key features")
+                    if int(getattr(scaler, 'n_features_in_', 0)) != len(key_features):
+                        raise ValueError("model scaler width does not match key features")
+                    training_samples = int(saved.get('training_samples', 0))
+                    if training_samples < 100:
+                        raise ValueError("model has fewer than 100 training samples")
+                    self.model = model
+                    self.scaler = scaler
+                    self.key_features = key_features
                     self.is_trained = True
-                    training_info = saved.get('training_samples', 'unknown')
-                    self.logger.info(f"✅ Loaded pre-trained Isolation Forest model ({training_info} samples)")
+                    self.training_samples = training_samples
+                    training_info = self.training_samples
+                    self.logger.info(
+                        f"✅ Loaded pre-trained Isolation Forest model ({training_info} samples)"
+                    )
                     return
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to load model: {e}")
@@ -107,7 +138,7 @@ class IsolationForestDetector:
         self.is_trained = False
         self.logger.info("🌲 Initialized new Isolation Forest (untrained)")
     
-    def train(self, normal_traffic_samples: List[List[float]]):
+    def train(self, normal_traffic_samples: list[list[float]]):
         """
         Train the model on normal traffic samples.
         
@@ -119,7 +150,13 @@ class IsolationForestDetector:
             return
         
         if len(normal_traffic_samples) < 100:
-            self.logger.warning(f"⚠️ Only {len(normal_traffic_samples)} samples, need 100+ for good training")
+            raise ValueError("at least 100 known-normal samples are required")
+
+        for sample in normal_traffic_samples:
+            if len(sample) != FEATURE_COUNT or not all(
+                math.isfinite(float(value)) for value in sample
+            ):
+                raise ValueError(f"each sample must contain {FEATURE_COUNT} finite values")
         
         # Extract key features
         X = np.array([self._select_features(sample) for sample in normal_traffic_samples])
@@ -130,13 +167,14 @@ class IsolationForestDetector:
         # Train model
         self.model.fit(X_scaled)
         self.is_trained = True
+        self.training_samples = len(normal_traffic_samples)
         
         self.logger.info(f"✅ Trained Isolation Forest on {len(normal_traffic_samples)} samples")
         
         # Save model
         self.save()
     
-    def predict(self, features: List[float]) -> Dict:
+    def predict(self, features: list[float]) -> dict:
         """
         Predict anomaly score for a feature vector.
         
@@ -178,7 +216,7 @@ class IsolationForestDetector:
             "model": "isolation_forest",
         }
     
-    def _untrained_predict(self, features: List[float]) -> Dict:
+    def _untrained_predict(self, features: list[float]) -> dict:
         """Prediction when model hasn't been trained on data"""
         # Use the model in unsupervised mode
         X = np.array([self._select_features(features)])
@@ -187,7 +225,7 @@ class IsolationForestDetector:
         # In production, you'd want background fitting
         try:
             raw_score = self.model.score_samples(X)[0]
-        except:
+        except (AttributeError, ValueError):
             raw_score = 0.0
         
         # Combine with rule-based scoring
@@ -201,7 +239,7 @@ class IsolationForestDetector:
             "model": "isolation_forest_untrained",
         }
     
-    def _rule_based_predict(self, features: List[float]) -> Dict:
+    def _rule_based_predict(self, features: list[float]) -> dict:
         """
         Fallback rule-based anomaly detection.
         Used when sklearn isn't available or model isn't trained.
@@ -227,7 +265,7 @@ class IsolationForestDetector:
                 reasons.append("dga_pattern")
             
             # Suspicious flow ratio (data exfiltration)
-            if features[15] > 0.9:
+            if features[16] > 0.9:
                 risk += 0.25
                 reasons.append("exfiltration_pattern")
             
@@ -252,7 +290,7 @@ class IsolationForestDetector:
             "reasons": reasons,
         }
     
-    def _select_features(self, features: List[float]) -> List[float]:
+    def _select_features(self, features: list[float]) -> list[float]:
         """Select key features for anomaly detection"""
         return [features[i] if i < len(features) else 0.0 for i in self.key_features]
     
@@ -287,16 +325,23 @@ class IsolationForestDetector:
             return
         
         save_path = path or self.model_path
+        parent = os.path.dirname(os.path.abspath(save_path))
+        os.makedirs(parent, exist_ok=True)
         
         with open(save_path, 'wb') as f:
             pickle.dump({
+                'artifact_format': 'netguard-isolation-forest-v1',
+                'feature_schema': FEATURE_SCHEMA,
+                'n_features': FEATURE_COUNT,
                 'model': self.model,
                 'scaler': self.scaler,
+                'key_features': self.key_features,
+                'training_samples': self.training_samples,
             }, f)
         
         self.logger.info(f"💾 Saved model to {save_path}")
     
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get detector statistics"""
         return {
             "has_sklearn": HAS_SKLEARN,
@@ -306,4 +351,5 @@ class IsolationForestDetector:
             # model (no estimators_ yet) - check identity instead.
             "n_estimators": self.model.n_estimators if self.model is not None else 0,
             "contamination": 0.05,
+            "training_samples": self.training_samples,
         }

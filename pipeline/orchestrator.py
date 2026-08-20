@@ -342,6 +342,11 @@ class ScanOrchestrator:
         critical_evidence = any(
             contribution.severity == "critical" for contribution in fused.contributions
         )
+        corroborating_sources = {
+            contribution.source
+            for contribution in fused.contributions
+            if contribution.severity in {"high", "critical"}
+        }
         calibrated_for_enforcement = self.calibrator.fitted_samples > 0
         if not calibrated_for_enforcement:
             warnings.append(
@@ -353,6 +358,7 @@ class ScanOrchestrator:
             calibrated_for_enforcement
             and category != "safe"
             and risk_score >= config.BLOCK_RISK_THRESHOLD
+            and corroborating_sources
         ):
             decision = "block"
         elif category != "safe" or risk_score >= config.REVIEW_RISK_THRESHOLD:
@@ -381,8 +387,8 @@ class ScanOrchestrator:
             recommendation = "Do not access this target; it violated the live-analysis network policy."
         elif decision == "review":
             recommendation = (
-                "Treat this URL as unverified and obtain deeper evidence or "
-                "analyst review before proceeding."
+                "Treat this URL as unverified and obtain independent reputation, "
+                "content, or analyst evidence before blocking it."
             )
         else:
             recommendation = self.explainer.recommendation(category)

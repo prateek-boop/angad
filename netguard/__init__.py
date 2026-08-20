@@ -22,5 +22,13 @@ Usage:
 
 __version__ = "4.0.0"
 
-from .main import NetGuard as NetGuard
-from .main import main as main
+__all__ = ["NetGuard", "main"]
+
+
+def __getattr__(name):
+    """Keep lightweight submodule imports from initializing the ML stack."""
+    if name in __all__:
+        from .main import NetGuard, main
+
+        return {"NetGuard": NetGuard, "main": main}[name]
+    raise AttributeError(name)

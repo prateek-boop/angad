@@ -48,6 +48,20 @@ def test_block_client_calls_iptables_with_source_match(monkeypatch):
     assert engine.is_client_blocked("10.0.0.7")
 
 
+def test_block_ipv6_calls_ip6tables(monkeypatch):
+    run, calls = _fake_run()
+    monkeypatch.setattr(subprocess, "run", run)
+
+    engine = EnforcementEngine()
+    assert engine.block_ip("2001:db8::5", reason="test") is True
+
+    assert any(
+        args[:2] == ["ip6tables", "-A"] and "2001:db8::5" in args
+        for args in calls
+    )
+    assert engine.is_ip_blocked("2001:db8::5")
+
+
 def test_protected_client_ips_are_never_blocked(monkeypatch):
     run, calls = _fake_run()
     monkeypatch.setattr(subprocess, "run", run)

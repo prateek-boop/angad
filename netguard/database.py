@@ -7,12 +7,14 @@ device relayed through the proxy (or the local socket owner reported by
 the observer). It has no relation to Android app UIDs.
 """
 
-import sqlite3
-import logging
-import time
-import json
-from typing import Optional, Dict, List, Any
 from contextlib import contextmanager
+
+import json
+import logging
+import math
+import sqlite3
+import time
+from typing import Dict, List, Optional
 
 class ReputationDB:
     """
@@ -93,6 +95,17 @@ class ReputationDB:
                     timestamp INTEGER DEFAULT (strftime('%s', 'now'))
                 )
             """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS normal_traffic_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feature_schema TEXT NOT NULL,
+                    feature_vector TEXT NOT NULL,
+                    client_ip TEXT,
+                    sni TEXT,
+                    timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+                )
+            """)
             
             # Blocked IPs
             cursor.execute("""
@@ -127,6 +140,10 @@ class ReputationDB:
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_conn_uid ON connection_history(uid)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_history(timestamp)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_normal_sample_schema "
+                "ON normal_traffic_samples(feature_schema)"
+            )
             
             self.logger.info("✅ Reputation database initialized")
     
@@ -158,17 +175,14 @@ class ReputationDB:
                 new_avg = ((avg * total) + risk_score) / (total + 1)
                 
                 blocked_inc = 1 if action == "BLOCK" else 0
-                strike_inc = 1 if action == "WARN" else 0
-                
                 cursor.execute("""
                     UPDATE app_reputation SET
                         risk_score_avg = ?,
                         total_connections = total_connections + 1,
                         blocked_count = blocked_count + ?,
-                        strike_count = CASE WHEN ? = 'ALLOW' THEN MAX(0, strike_count - 1) ELSE strike_count + ? END,
                         last_seen = ?
                     WHERE uid = ?
-                """, (new_avg, blocked_inc, action, strike_inc, now, uid))
+                """, (new_avg, blocked_inc, now, uid))
             else:
                 # New app
                 cursor.execute("""
@@ -186,11 +200,17 @@ class ReputationDB:
     
     def add_strike(self, uid: str) -> int:
         """Add a strike and return new count"""
+        now = int(time.time())
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                UPDATE app_reputation SET strike_count = strike_count + 1 WHERE uid = ?
-            """, (uid,))
+                INSERT INTO app_reputation
+                    (uid, package_name, strike_count, first_seen, last_seen)
+                VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(uid) DO UPDATE SET
+                    strike_count = strike_count + 1,
+                    last_seen = excluded.last_seen
+            """, (uid, f"client:{uid}", now, now))
             cursor.execute("SELECT strike_count FROM app_reputation WHERE uid = ?", (uid,))
             row = cursor.fetchone()
             return row['strike_count'] if row else 0
@@ -200,22 +220,41 @@ class ReputationDB:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE app_reputation SET strike_count = 0 WHERE uid = ?", (uid,))
+
+    def decay_strikes(self):
+        """Persist one strike of forgiveness for every known client."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE app_reputation SET strike_count = MAX(0, strike_count - 1)")
     
     def set_user_trust(self, uid: str, trusted: bool):
         """Mark app as trusted by user"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            now = int(time.time())
             cursor.execute("""
-                UPDATE app_reputation SET user_trusted = ?, user_blocked = 0 WHERE uid = ?
-            """, (1 if trusted else 0, uid))
+                INSERT INTO app_reputation
+                    (uid, package_name, user_trusted, user_blocked, first_seen, last_seen)
+                VALUES (?, ?, ?, 0, ?, ?)
+                ON CONFLICT(uid) DO UPDATE SET
+                    user_trusted = excluded.user_trusted,
+                    user_blocked = 0,
+                    last_seen = excluded.last_seen
+            """, (uid, f"client:{uid}", 1 if trusted else 0, now, now))
     
     def set_user_block(self, uid: str, blocked: bool):
         """Mark app as blocked by user"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            now = int(time.time())
             cursor.execute("""
-                UPDATE app_reputation SET user_blocked = ?, user_trusted = 0 WHERE uid = ?
-            """, (1 if blocked else 0, uid))
+                INSERT INTO app_reputation
+                    (uid, package_name, user_blocked, user_trusted, first_seen, last_seen)
+                VALUES (?, ?, ?, 0, ?, ?)
+                ON CONFLICT(uid) DO UPDATE SET
+                    user_blocked = excluded.user_blocked,
+                    user_trusted = 0,
+                    last_seen = excluded.last_seen
+            """, (uid, f"client:{uid}", 1 if blocked else 0, now, now))
     
     def is_user_trusted(self, uid: str) -> bool:
         """Check if app is user-trusted"""
@@ -297,6 +336,49 @@ class ReputationDB:
         return z_score > threshold
     
     # === CONNECTION HISTORY ===
+
+    def add_normal_traffic_sample(
+        self, features: list[float], client_ip: str = "", sni: str = ""
+    ) -> int:
+        """Persist one explicitly collected, known-normal feature vector."""
+        from .constants import FEATURE_COUNT, FEATURE_SCHEMA
+
+        vector = [float(value) for value in features]
+        if len(vector) != FEATURE_COUNT or not all(math.isfinite(value) for value in vector):
+            raise ValueError(f"normal traffic samples must contain {FEATURE_COUNT} finite values")
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO normal_traffic_samples
+                    (feature_schema, feature_vector, client_ip, sni)
+                VALUES (?, ?, ?, ?)
+                """,
+                (FEATURE_SCHEMA, json.dumps(vector), client_ip, sni),
+            )
+            return int(cursor.lastrowid)
+
+    def get_normal_traffic_samples(self) -> list[list[float]]:
+        """Return samples matching the current feature schema."""
+        from .constants import FEATURE_SCHEMA
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT feature_vector FROM normal_traffic_samples "
+                "WHERE feature_schema = ? ORDER BY id",
+                (FEATURE_SCHEMA,),
+            ).fetchall()
+        return [json.loads(row["feature_vector"]) for row in rows]
+
+    def count_normal_traffic_samples(self) -> int:
+        from .constants import FEATURE_SCHEMA
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM normal_traffic_samples WHERE feature_schema = ?",
+                (FEATURE_SCHEMA,),
+            ).fetchone()
+        return int(row["count"])
     
     def log_connection(self, uid: str, dst_ip: str, dst_port: int, sni: str, 
                        risk_score: float, action: str, classification: str):

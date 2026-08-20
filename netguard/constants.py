@@ -2,6 +2,8 @@
 NetGuard - Global Constants and Thresholds
 """
 
+import os
+
 # === AI THRESHOLDS ===
 INSTANT_BLOCK_THRESHOLD = 0.90  # Risk score for immediate block
 WARN_THRESHOLD = 0.55           # Risk score to issue warning
@@ -17,6 +19,7 @@ WEBSOCKET_PORT = 8765           # WebSocket live feed port
 
 # === FEATURE VECTOR ===
 FEATURE_COUNT = 42              # Total features in vector
+FEATURE_SCHEMA = "netguard-42-v1"
 DNS_FEATURES = 11
 FLOW_FEATURES = 12
 APP_FEATURES = 5
@@ -57,6 +60,7 @@ KNOWN_MALWARE_JA3 = {
 
 # === LINUX BINARIES (PATH-resolved, standalone service) ===
 IPTABLES_BIN = "iptables"
+IP6TABLES_BIN = "ip6tables"
 SS_BIN = "ss"
 
 # === INFRASTRUCTURE ALLOWLIST ===
@@ -65,4 +69,4 @@ SS_BIN = "ss"
 PROTECTED_CLIENT_IPS = {"127.0.0.1", "::1"}
 
 # === DATABASE ===
-DB_PATH = "netguard_reputation.db"
+DB_PATH = os.path.join(os.getenv("SHIELDNET_DATA_DIR", "."), "netguard_reputation.db")

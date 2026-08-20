@@ -167,10 +167,8 @@ class FeatureExtractor:
         """
         App metadata slots (permission count, is-system, app age, background
         restricted, dangerous permissions) came from Android's PackageManager,
-        which has no equivalent on a standalone TCP proxy. Always zeroed —
-        kept as a stub slot rather than reshaping the 42-dim vector, since
-        the trained models already pad/truncate their input via
-        `AIEngine._adapt_features`.
+        which has no equivalent on a standalone TCP proxy. Always zeroed and
+        kept as contract slots rather than reshaping the 42-dim vector.
         """
         return [0.0] * 5
     

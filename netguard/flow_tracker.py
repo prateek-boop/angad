@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Optional, Tuple
 from collections import defaultdict
 from dataclasses import dataclass, field
-from threading import Lock
+from threading import RLock
 
 
 @dataclass
@@ -126,7 +126,7 @@ class FlowTracker:
             "total_bytes": 0,
             "unique_destinations": set(),
         })
-        self._lock = Lock()
+        self._lock = RLock()
         
         # Thresholds for anomaly detection
         self.BURST_THRESHOLD = 10000  # bytes/sec for "burst"
@@ -155,12 +155,13 @@ class FlowTracker:
     
     def update_flow(self, conn: Dict, tx_bytes: int = 0, rx_bytes: int = 0):
         """Update flow with new traffic data"""
-        flow = self.get_or_create_flow(conn)
-        flow.update(tx_bytes, rx_bytes)
-        
-        # Update UID aggregate
-        uid = conn.get('uid', 0)
-        self._uid_stats[uid]["total_bytes"] += tx_bytes + rx_bytes
+        with self._lock:
+            flow = self.get_or_create_flow(conn)
+            flow.update(tx_bytes, rx_bytes)
+
+            # Update UID aggregate
+            uid = conn.get('uid', 0)
+            self._uid_stats[uid]["total_bytes"] += tx_bytes + rx_bytes
     
     def get_flow_metrics(self, conn: Dict) -> Dict:
         """Get current metrics for a connection"""

@@ -50,8 +50,16 @@ def _verdict_explanation(result: dict, tier_results: dict) -> dict[str, str]:
             f"Above the review threshold ({config.REVIEW_RISK_THRESHOLD}) but "
             f"below the block threshold ({config.BLOCK_RISK_THRESHOLD}) -> {decision}"
         )
+    elif decision == "block":
+        arrow = (
+            f"At or above the block threshold ({config.BLOCK_RISK_THRESHOLD}) "
+            "with independent enforcement evidence -> block"
+        )
     else:
-        arrow = f"At or above the block threshold ({config.BLOCK_RISK_THRESHOLD}) -> {decision}"
+        arrow = (
+            f"At or above the numeric block threshold ({config.BLOCK_RISK_THRESHOLD}) "
+            f"but without independent enforcement evidence -> {decision}"
+        )
 
     if uncertainty < 0.2:
         mood = "low"
@@ -82,10 +90,16 @@ def _verdict_explanation(result: dict, tier_results: dict) -> dict[str, str]:
             f"Classified as {category} with risk {risk:.2f}, at or above the "
             "block threshold — critical threat."
         )
-    else:
+    elif risk < config.BLOCK_RISK_THRESHOLD:
         why = (
             f"Classified as {category} but risk ({risk:.2f}) is below the "
             "block threshold; deeper review is advised."
+        )
+    else:
+        why = (
+            f"Classified as {category} with high model risk ({risk:.2f}), but "
+            "no independent enforcement evidence verified the prediction; "
+            "deeper review is required instead of blocking."
         )
     return {
         "category": f"final fused label: {category}",

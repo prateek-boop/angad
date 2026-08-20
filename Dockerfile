@@ -4,6 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    CUDA_VISIBLE_DEVICES=-1 \
+    TF_CPP_MIN_LOG_LEVEL=2 \
     HOME=/tmp/shieldnet-home
 
 WORKDIR /app
@@ -11,7 +13,8 @@ COPY . /app
 
 # iptables is needed by the netguard service (direct subprocess calls, no
 # Shizuku/ADB indirection) - harmless for the shieldnet API image.
-RUN apt-get update && apt-get install -y --no-install-recommends iptables \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        iproute2 iptables libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Playwright is a base dependency (all five tiers run by default), so the
@@ -24,6 +27,10 @@ RUN python -m pip install . && \
     chown -R shieldnet:shieldnet /app/data /tmp/shieldnet-home /opt/ms-playwright && \
     find /app -type f -exec chmod a+r {} + && \
     find /app -type d -exec chmod a+rx {} +
+
+# Fail the image build when a bundled model is absent, incompatible, or below
+# the minimum recorded validation contract used at runtime.
+RUN python scripts/verify_models.py
 
 USER shieldnet
 EXPOSE 8000

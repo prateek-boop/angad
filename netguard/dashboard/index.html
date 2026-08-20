@@ -39,7 +39,16 @@
     </div>
 
     <script>
-        const socket = io("http://localhost:8080");
+        const socket = io();
+
+        function addLines(entry, lines) {
+            lines.forEach((line, index) => {
+                if (index) entry.appendChild(document.createElement('br'));
+                const text = document.createElement(index === 0 ? 'b' : 'span');
+                text.textContent = line;
+                entry.appendChild(text);
+            });
+        }
         
         // Connection status
         socket.on('connect', () => {
@@ -60,7 +69,7 @@
             const logs = document.getElementById('traffic-logs');
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            entry.innerHTML = `[${new Date().toLocaleTimeString()}] <span style="color:#5bc0de">PID ${data.uid}</span> → ${data.dst_ip}:${data.dst_port} (${data.protocol || 'TCP'})`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] Client ${data.uid} -> ${data.dst_ip}:${data.dst_port} (${data.protocol || 'TCP'})`;
             logs.prepend(entry);
             if (logs.children.length > 50) logs.lastChild.remove();
         });
@@ -70,11 +79,11 @@
             const entry = document.createElement('div');
             const riskClass = data.risk_score > 0.7 ? 'verdict-critical' : data.risk_score > 0.4 ? 'verdict-block' : 'verdict-normal';
             entry.className = 'log-entry ' + riskClass;
-            entry.innerHTML = `
-                <b>PID: ${data.uid}</b><br>
-                Risk: ${(data.risk_score * 100).toFixed(0)}% | Class: <b>${data.classification}</b><br>
-                Action: <span style="font-weight:bold; color:${data.action === 'BLOCK' ? '#d9534f' : data.action === 'WARN' ? '#f0ad4e' : '#5cb85c'}">${data.action}</span>
-            `;
+            addLines(entry, [
+                `Client: ${data.uid}`,
+                `Risk: ${(data.risk_score * 100).toFixed(0)}% | Class: ${data.classification}`,
+                `Action: ${data.action}${data.reason ? ` | ${data.reason}` : ''}`,
+            ]);
             logs.prepend(entry);
             if (logs.children.length > 30) logs.lastChild.remove();
         });

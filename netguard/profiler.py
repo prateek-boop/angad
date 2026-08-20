@@ -4,6 +4,7 @@ Builds per-app baselines and detects deviations
 """
 
 import logging
+import threading
 import time
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
@@ -140,20 +141,23 @@ class AppProfiler:
         self.logger = logging.getLogger("PROFILER")
         self.db = db
         self._profiles: Dict[int, AppProfile] = {}
+        self._lock = threading.RLock()
     
     def get_or_create_profile(self, uid: str, package_name: str = None) -> AppProfile:
         """Get existing profile or create new one"""
-        if uid not in self._profiles:
-            self._profiles[uid] = AppProfile(
-                uid=uid,
-                package_name=package_name or f"uid:{uid}"
-            )
-        return self._profiles[uid]
+        with self._lock:
+            if uid not in self._profiles:
+                self._profiles[uid] = AppProfile(
+                    uid=uid,
+                    package_name=package_name or f"uid:{uid}"
+                )
+            return self._profiles[uid]
     
     def update_profile(self, uid: str, conn: Dict, verdict: Dict, package_name: str = None):
         """Update app profile with connection result"""
-        profile = self.get_or_create_profile(uid, package_name)
-        profile.update_baseline(conn, verdict)
+        with self._lock:
+            profile = self.get_or_create_profile(uid, package_name)
+            profile.update_baseline(conn, verdict)
         
         # Persist to database
         if self.db:
@@ -173,36 +177,33 @@ class AppProfiler:
             - Negative = behavior matches baseline, reduce risk
             - Positive = behavior deviates from baseline, increase risk
         """
-        if uid not in self._profiles:
-            return 0.0  # No profile, no adjustment
-        
-        profile = self._profiles[uid]
-        adjustment = 0.0
-        
-        # Check port anomaly
-        dst_port = conn.get("dst_port", 0)
-        if profile.is_anomalous_port(dst_port):
-            adjustment += 0.15
-        
-        # Check destination anomaly
-        dst_ip = conn.get("dst_ip", "")
-        sni = conn.get("sni", "")
-        if profile.is_anomalous_destination(dst_ip, sni):
-            adjustment += 0.15
-        
-        # Check time anomaly
-        hour = time.localtime().tm_hour
-        if profile.is_anomalous_time(hour):
-            adjustment += 0.1
-        
-        # Trust-based adjustment
-        trust = profile.trust_score
-        if trust > 0.8:
-            adjustment -= 0.1  # High trust = reduce risk
-        elif trust < 0.3:
-            adjustment += 0.1  # Low trust = increase risk
-        
-        return max(min(adjustment, 0.3), -0.3)
+        with self._lock:
+            if uid not in self._profiles:
+                return 0.0  # No profile, no adjustment
+
+            profile = self._profiles[uid]
+            adjustment = 0.0
+
+            dst_port = conn.get("dst_port", 0)
+            if profile.is_anomalous_port(dst_port):
+                adjustment += 0.15
+
+            dst_ip = conn.get("dst_ip", "")
+            sni = conn.get("sni", "")
+            if profile.is_anomalous_destination(dst_ip, sni):
+                adjustment += 0.15
+
+            hour = time.localtime().tm_hour
+            if profile.is_anomalous_time(hour):
+                adjustment += 0.1
+
+            trust = profile.trust_score
+            if trust > 0.8:
+                adjustment -= 0.1
+            elif trust < 0.3:
+                adjustment += 0.1
+
+            return max(min(adjustment, 0.3), -0.3)
     
     def get_trust_score(self, uid: str) -> float:
         """Get trust score for an app"""

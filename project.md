@@ -139,9 +139,14 @@ path, so a bad connection never gets a chance to talk to its destination.
 - `netguard/flow_tracker.py` — per-connection byte/packet rate tracking and burst/anomaly
   detection feeding into the feature vector.
 - `netguard/ai_engine.py` — `AIEngine`, the two-tier traffic classifier (fast trained classifier
-  or Isolation Forest fallback, escalating to a deeper model when uncertain), plus
-  `_blend_url_reputation()` which folds ShieldNet's domain verdict into the traffic verdict.
+  or Isolation Forest fallback, escalating to a compatible deeper model when uncertain), plus
+  a validated Random Forest/Keras payload ensemble and a telemetry-only path for unverified
+  ShieldNet domain output.
 - `netguard/isolation_forest.py` — the anomaly-detection fallback model.
+- `netguard/payload_model.py` — supervised Random Forest and compact Keras pre-relay payload
+  classifiers trained from IoT-23 captures (`netguard-train-payload` and
+  `netguard-train-deep-payload`), scored as one correlated signal from the first
+  plaintext client bytes before forwarding.
 - `netguard/decision_engine.py` — turns a risk verdict into allow/warn/block, with a strike
   system (repeated warnings escalate to a block) and user trust/block overrides.
 - `netguard/profiler.py` — per-client behavioral baselines (normal ports/domains/hours) used to
@@ -165,11 +170,10 @@ address).
 
 ### Known limitations
 
-- The bundled `netguard/models/*.pkl` and `*.h5` files are **placeholders, not real trained
-  models** — they fail to load (`invalid load key`) and NetGuard falls back to rule-based /
-  untrained-Isolation-Forest detection at runtime. The traffic-behavior "AI" is currently
-  more scaffolding than a working classifier; training real models on real traffic data is
-  the natural next step.
+- No compatible supervised 42-feature traffic classifier is bundled. The incompatible legacy
+  26/39/65-feature artifacts were removed instead of being padded or truncated into a different
+  schema. The flow path uses rule-based detection plus the bundled trained Isolation Forest,
+  while inspectable plaintext uses the bundled Random Forest/Keras payload ensemble.
 - `netguard/feature_extractor.py`'s 5 "App Metadata" feature slots are permanently zeroed —
   they came from Android's PackageManager (permission count, app age, etc.), which has no
   equivalent on a standalone proxy.
@@ -184,10 +188,11 @@ address).
 `integrations/netguard_bridge.py` — `UrlReputationBridge`. Holds one shared `ScanOrchestrator`
 instance and exposes `check_domain(sni) -> dict`. Called from
 `netguard/main.py:NetGuard._check_connection()` for every SNI hostname NetGuard's proxy sees,
-running a `tier0` (instant, local-only) ShieldNet scan. The result folds into `AIEngine.analyze()`
-via `url_reputation=...`, and any ShieldNet-driven reason (`shieldnet_domain_*`) surfaces in the
-final decision's reason string. A ShieldNet scan failure never blocks a connection — it fails
-back to a neutral "safe" result.
+running a `tier0` (instant, local-only) ShieldNet scan. The result reaches `AIEngine.analyze()`
+via `url_reputation=...`. Unverified URL-model output is retained as
+`url_model_observation` telemetry and cannot change risk, add strikes, corroborate another
+model, or block. Verified high/critical evidence can add `shieldnet_verified_*`. A ShieldNet
+scan failure never blocks a connection; it fails back to a neutral result.
 
 ---
 

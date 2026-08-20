@@ -160,12 +160,14 @@ class NetworkObserver:
         closed_keys = set(self._active_connections.keys()) - current_keys
         for key in closed_keys:
             del self._active_connections[key]
+            self._seen_keys.discard(key)
 
         return processed
 
     def _get_conn_key(self, conn: Dict) -> str:
         """Generate unique key for a connection"""
-        return f"{conn['uid']}-{conn['src_ip']}:{conn['src_port']}-{conn['dst_ip']}:{conn['dst_port']}"
+        inode = conn.get("inode", 0)
+        return f"{conn['uid']}-{conn['src_ip']}:{conn['src_port']}-{conn['dst_ip']}:{conn['dst_port']}-{inode}"
 
     def _query_netlink(self) -> List[Dict]:
         """Query connections using Netlink INET_DIAG"""
@@ -186,10 +188,19 @@ class NetworkObserver:
                         break
                     response += chunk
 
-                    if len(chunk) >= 16:
-                        nlmsg_type = int.from_bytes(chunk[4:6], 'little')
-                        if nlmsg_type == 3:  # NLMSG_DONE
+                    offset = 0
+                    done = False
+                    while offset + 16 <= len(chunk):
+                        length = int.from_bytes(chunk[offset:offset + 4], 'little')
+                        if length < 16 or offset + length > len(chunk):
                             break
+                        nlmsg_type = int.from_bytes(chunk[offset + 4:offset + 6], 'little')
+                        if nlmsg_type == 3:  # NLMSG_DONE
+                            done = True
+                            break
+                        offset += (length + 3) & ~3
+                    if done:
+                        break
                 except socket.timeout:
                     break
 
