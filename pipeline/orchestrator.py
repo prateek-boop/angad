@@ -373,6 +373,7 @@ class ScanOrchestrator:
             redirects=redirects,
             html=html,
             visual=visual,
+            url=final_url,
         )
         category = fused.category
         risk_score = fused.risk_score

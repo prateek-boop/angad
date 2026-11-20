@@ -3,14 +3,13 @@ NetGuard - Feature Extractor
 Converts raw connection data into 42-dimensional feature vector for AI
 """
 
+import logging
 import math
 import time
-import logging
 from collections import Counter
-from typing import Dict, List, Optional
 
+from .constants import FEATURE_COUNT, RISKY_TLDS
 from .flow_tracker import FlowTracker
-from .constants import RISKY_TLDS, FEATURE_COUNT
 
 
 class FeatureExtractor:
@@ -32,9 +31,9 @@ class FeatureExtractor:
         self.logger = logging.getLogger("EXTRACTOR")
         self.flow_tracker = flow_tracker or FlowTracker()
     
-    def extract_features(self, conn_info: Dict, 
-                        tls_metadata: Optional[Dict] = None,
-                        app_metadata: Optional[Dict] = None) -> List[float]:
+    def extract_features(self, conn_info: dict, 
+                        tls_metadata: dict | None = None,
+                        app_metadata: dict | None = None) -> list[float]:
         """
         Main entry point to build the 42-feature vector.
         
@@ -73,7 +72,7 @@ class FeatureExtractor:
         
         return features[:FEATURE_COUNT]
     
-    def _extract_dns_features(self, domain: str) -> List[float]:
+    def _extract_dns_features(self, domain: str) -> list[float]:
         """
         Extract 11 DNS/Domain features.
         
@@ -143,7 +142,7 @@ class FeatureExtractor:
             numeric_subdomain,       # 10
         ]
     
-    def _extract_flow_features(self, conn: Dict) -> List[float]:
+    def _extract_flow_features(self, conn: dict) -> list[float]:
         """
         Extract 12 flow features from connection and flow tracker.
         
@@ -163,7 +162,7 @@ class FeatureExtractor:
         """
         return self.flow_tracker.get_flow_features(conn)
     
-    def _extract_app_features(self, app: Optional[Dict]) -> List[float]:
+    def _extract_app_features(self, app: dict | None) -> list[float]:
         """
         App metadata slots (permission count, is-system, app age, background
         restricted, dangerous permissions) came from Android's PackageManager,
@@ -172,7 +171,7 @@ class FeatureExtractor:
         """
         return [0.0] * 5
     
-    def _extract_tls_features(self, tls: Optional[Dict], domain: str) -> List[float]:
+    def _extract_tls_features(self, tls: dict | None, domain: str) -> list[float]:
         """
         Extract 8 TLS features.
         
@@ -225,7 +224,7 @@ class FeatureExtractor:
             0.0,  # cert_chain_length (future)         # 7
         ]
     
-    def _extract_temporal_features(self, conn: Dict) -> List[float]:
+    def _extract_temporal_features(self, conn: dict) -> list[float]:
         """
         Extract 6 temporal and behavioral features.
         
@@ -291,7 +290,7 @@ class FeatureExtractor:
         
         return max_count
     
-    def get_feature_names(self) -> List[str]:
+    def get_feature_names(self) -> list[str]:
         """Get names of all 42 features for debugging/explainability"""
         return [
             # DNS (0-10)

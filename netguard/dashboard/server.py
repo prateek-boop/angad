@@ -111,3 +111,10 @@ class DashboardServer:
     def emit_connection(self, conn):
         """Pushes a live connection event to the UI."""
         self.socketio.emit('new_connection', conn)
+
+    def stop(self):
+        """Stops the dashboard server."""
+        try:
+            self.socketio.stop()
+        except Exception:
+            pass

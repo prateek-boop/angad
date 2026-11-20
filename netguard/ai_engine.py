@@ -620,9 +620,19 @@ class AIEngine:
         classification = "UNKNOWN"
         confidence = 0.5
         
-        # Safe ports check
+        # Safe ports check (only when no flow exfiltration/burst indicators)
+        tx_rx_ratio = features[16] if len(features) > 16 else 0.0
+        is_burst = features[21] if len(features) > 21 else 0.0
+        has_suspicious_ratio = features[22] if len(features) > 22 else 0.0
+
         if dst_port in SAFE_PORTS and features[0] > 0:
-            if dns_entropy < 3.5 and tld_risk == 0:
+            if (
+                dns_entropy < 3.5
+                and tld_risk == 0
+                and tx_rx_ratio < 0.85
+                and not is_burst
+                and not has_suspicious_ratio
+            ):
                 return {
                     "risk_score": 0.1,
                     "classification": "SAFE_WEB",

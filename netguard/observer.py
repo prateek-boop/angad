@@ -4,11 +4,10 @@ Real-time socket monitoring using Netlink INET_DIAG on Linux.
 Falls back to `ss` (direct subprocess) or psutil for development/other platforms.
 """
 
-import socket
-import os
 import logging
+import os
 import platform
-from typing import List, Dict, Set, Optional
+import socket
 
 try:
     import psutil
@@ -16,9 +15,9 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+from .constants import NETLINK_INET_DIAG
 from .netlink_parser import NetlinkParser, parse_ss_output
 from .shell import run_ss
-from .constants import NETLINK_INET_DIAG
 
 
 class NetworkObserver:
@@ -46,10 +45,10 @@ class NetworkObserver:
 
         self.netlink_parser = NetlinkParser()
 
-        self.netlink_sock: Optional[socket.socket] = None
+        self.netlink_sock: socket.socket | None = None
 
-        self._active_connections: Dict[str, Dict] = {}
-        self._seen_keys: Set[str] = set()
+        self._active_connections: dict[str, dict] = {}
+        self._seen_keys: set[str] = set()
 
         self._use_netlink = False
         self._use_ss = False
@@ -112,7 +111,7 @@ class NetworkObserver:
         except (psutil.AccessDenied, RuntimeError):
             return False
 
-    def get_active_connections(self) -> List[Dict]:
+    def get_active_connections(self) -> list[dict]:
         """
         Get all currently active network connections.
 
@@ -164,12 +163,14 @@ class NetworkObserver:
 
         return processed
 
-    def _get_conn_key(self, conn: Dict) -> str:
+    def _get_conn_key(self, conn: dict) -> str:
         """Generate unique key for a connection"""
         inode = conn.get("inode", 0)
-        return f"{conn['uid']}-{conn['src_ip']}:{conn['src_port']}-{conn['dst_ip']}:{conn['dst_port']}-{inode}"
+        src = f"{conn['src_ip']}:{conn['src_port']}"
+        dst = f"{conn['dst_ip']}:{conn['dst_port']}"
+        return f"{conn['uid']}-{src}-{dst}-{inode}"
 
-    def _query_netlink(self) -> List[Dict]:
+    def _query_netlink(self) -> list[dict]:
         """Query connections using Netlink INET_DIAG"""
         connections = []
 
@@ -201,7 +202,7 @@ class NetworkObserver:
                         offset += (length + 3) & ~3
                     if done:
                         break
-                except socket.timeout:
+                except TimeoutError:
                     break
 
             sockets = self.netlink_parser.parse_netlink_response(response)
@@ -212,7 +213,7 @@ class NetworkObserver:
 
         return connections
 
-    def _query_ss(self) -> List[Dict]:
+    def _query_ss(self) -> list[dict]:
         """Query connections using ss directly"""
         code, output, err = run_ss()
 
@@ -222,7 +223,7 @@ class NetworkObserver:
 
         return parse_ss_output(output)
 
-    def _query_psutil(self) -> List[Dict]:
+    def _query_psutil(self) -> list[dict]:
         """Query connections using psutil"""
         connections = []
 
@@ -253,7 +254,7 @@ class NetworkObserver:
         """Get number of currently tracked connections"""
         return len(self._active_connections)
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get observer statistics"""
         return {
             "is_running": self.is_running,

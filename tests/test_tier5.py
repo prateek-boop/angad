@@ -57,6 +57,73 @@ def test_evidence_ensemble_exact_feed_and_html_override():
     assert phishing.probabilities["phishing"] > base["phishing"]
 
 
+def test_evidence_ensemble_grayware_and_telemetry_heuristics():
+    base = {name: 0.05 for name in config.THREAT_CLASSES}
+    base["safe"] = 0.8
+    ensemble = EvidenceEnsemble()
+
+    cineby = ensemble.fuse(base, url="https://cineby.to")
+    assert cineby.category == "scam"
+    assert cineby.risk_score > 0.95
+    assert cineby.contributions[0].severity == "high"
+
+    netmirror = ensemble.fuse(base, url="https://netmirror.app")
+    assert netmirror.category == "scam"
+    assert netmirror.risk_score > 0.95
+
+    telemetry = ensemble.fuse(
+        base, url="https://mobiledetect.app/check.php?imei=8675309&gps=true"
+    )
+    assert telemetry.category == "data_leak"
+    assert telemetry.risk_score > 0.99
+    assert telemetry.contributions[0].severity == "critical"
+
+    dropper = ensemble.fuse(
+        base, url="https://cineby.app/downloads/player-update.apk"
+    )
+    assert dropper.category == "malware"
+    assert dropper.risk_score > 0.99
+
+    phish = ensemble.fuse(
+        base, url="https://netflix-login-verify-account.netmirror.vip"
+    )
+    assert phish.category == "phishing"
+    assert phish.risk_score > 0.99
+
+    netflix = ensemble.fuse(base, url="https://netflix.com")
+    assert netflix.category == "safe"
+    assert netflix.risk_score < 0.05
+
+    # Leetspeak & homoglyphs
+    leet = ensemble.fuse(base, url="https://c1neby.to")
+    assert leet.category == "scam"
+    assert leet.risk_score > 0.95
+
+    puny = ensemble.fuse(base, url="https://xn--cneby-rsa.to")
+    assert puny.category in {"scam", "phishing"}
+    assert puny.risk_score > 0.95
+
+    # Base64 telemetry payload
+    b64 = ensemble.fuse(
+        base,
+        url="https://telemetry-tracker.ru/log?payload=eyJpbWVpIjoiMTIzNDU2In0=",
+    )
+    assert b64.category == "data_leak"
+    assert b64.risk_score > 0.99
+
+    # Torrent piracy tracker
+    tpb = ensemble.fuse(base, url="https://thepiratebay.party")
+    assert tpb.category == "scam"
+    assert tpb.risk_score > 0.95
+
+    # Open redirect cloaking
+    redirect_cloak = ensemble.fuse(
+        base, url="https://safesite.org/redirect?url=https://cineby.to"
+    )
+    assert redirect_cloak.category == "scam"
+    assert redirect_cloak.risk_score > 0.95
+
+
 def test_feedback_store_redacts_secrets_and_links_scan(tmp_path):
     path = tmp_path / "feedback.sqlite3"
     store = FeedbackStore(str(path))

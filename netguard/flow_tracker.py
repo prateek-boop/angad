@@ -3,9 +3,8 @@ NetGuard - Flow Tracker
 Real-time tracking of bytes, packets, and connection metrics
 """
 
-import time
 import logging
-from typing import Dict, Optional, Tuple
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from threading import RLock
@@ -90,7 +89,7 @@ class ConnectionFlow:
     def total_packets(self) -> int:
         return self.tx_packets + self.rx_packets
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "conn_key": self.conn_key,
             "uid": self.uid,
@@ -120,8 +119,8 @@ class FlowTracker:
     
     def __init__(self):
         self.logger = logging.getLogger("FLOW_TRACKER")
-        self._flows: Dict[str, ConnectionFlow] = {}
-        self._uid_stats: Dict[int, Dict] = defaultdict(lambda: {
+        self._flows: dict[str, ConnectionFlow] = {}
+        self._uid_stats: dict[int, dict] = defaultdict(lambda: {
             "total_connections": 0,
             "total_bytes": 0,
             "unique_destinations": set(),
@@ -133,7 +132,7 @@ class FlowTracker:
         self.SUSPICIOUS_RATIO_LOW = 0.1  # Almost all download
         self.SUSPICIOUS_RATIO_HIGH = 0.9  # Almost all upload (exfiltration?)
     
-    def get_or_create_flow(self, conn: Dict) -> ConnectionFlow:
+    def get_or_create_flow(self, conn: dict) -> ConnectionFlow:
         """Get existing flow or create new one"""
         conn_key = self._make_key(conn)
         
@@ -153,7 +152,7 @@ class FlowTracker:
             
             return self._flows[conn_key]
     
-    def update_flow(self, conn: Dict, tx_bytes: int = 0, rx_bytes: int = 0):
+    def update_flow(self, conn: dict, tx_bytes: int = 0, rx_bytes: int = 0):
         """Update flow with new traffic data"""
         with self._lock:
             flow = self.get_or_create_flow(conn)
@@ -163,7 +162,7 @@ class FlowTracker:
             uid = conn.get('uid', 0)
             self._uid_stats[uid]["total_bytes"] += tx_bytes + rx_bytes
     
-    def get_flow_metrics(self, conn: Dict) -> Dict:
+    def get_flow_metrics(self, conn: dict) -> dict:
         """Get current metrics for a connection"""
         conn_key = self._make_key(conn)
         
@@ -180,7 +179,7 @@ class FlowTracker:
             "total_bytes": 0,
         }
     
-    def get_uid_stats(self, uid: str) -> Dict:
+    def get_uid_stats(self, uid: str) -> dict:
         """Get aggregate stats for an app/UID"""
         with self._lock:
             stats = self._uid_stats.get(uid, {})
@@ -190,7 +189,7 @@ class FlowTracker:
                 "unique_destinations": len(stats.get("unique_destinations", set())),
             }
     
-    def detect_anomalies(self, conn: Dict) -> Dict:
+    def detect_anomalies(self, conn: dict) -> dict:
         """
         Detect flow anomalies for a connection.
         Returns dict of anomaly indicators.
@@ -225,7 +224,7 @@ class FlowTracker:
         
         return anomalies
     
-    def get_flow_features(self, conn: Dict) -> list:
+    def get_flow_features(self, conn: dict) -> list:
         """
         Extract flow features for AI model.
         Returns list of 12 flow features.
@@ -239,7 +238,7 @@ class FlowTracker:
         try:
             ip_parts = [float(p) for p in dst_ip.split('.') if p.isdigit()]
             ip_sum = sum(ip_parts) if ip_parts else 0.0
-        except:
+        except Exception:
             ip_sum = 0.0
         
         return [
@@ -257,9 +256,11 @@ class FlowTracker:
             1.0 if anomalies["suspicious_ratio"] else 0.0,  # 11: Suspicious ratio
         ]
     
-    def _make_key(self, conn: Dict) -> str:
+    def _make_key(self, conn: dict) -> str:
         """Generate unique key for connection"""
-        return f"{conn.get('uid', 0)}-{conn.get('src_ip', '')}:{conn.get('src_port', 0)}-{conn.get('dst_ip', '')}:{conn.get('dst_port', 0)}"
+        src = f"{conn.get('src_ip', '')}:{conn.get('src_port', 0)}"
+        dst = f"{conn.get('dst_ip', '')}:{conn.get('dst_port', 0)}"
+        return f"{conn.get('uid', 0)}-{src}-{dst}"
     
     def cleanup_old_flows(self, max_age: float = 300):
         """Remove flows older than max_age seconds"""
@@ -274,7 +275,7 @@ class FlowTracker:
         if expired:
             self.logger.debug(f"🧹 Cleaned up {len(expired)} expired flows")
     
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get tracker statistics"""
         with self._lock:
             return {

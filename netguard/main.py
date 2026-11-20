@@ -58,10 +58,16 @@ class NetGuard:
         guard.stop()
     """
 
-    def __init__(self, db_path: str = constants.DB_PATH, collect_normal: bool = False):
+    def __init__(
+        self,
+        db_path: str = constants.DB_PATH,
+        collect_normal: bool = False,
+        enable_iptables: bool = True,
+    ):
         self.logger = logging.getLogger("NETGUARD")
         self.is_running = False
         self.collect_normal = collect_normal
+        self.enable_iptables = enable_iptables
 
         self.logger.info("🚀 Initializing NetGuard...")
 
@@ -71,11 +77,11 @@ class NetGuard:
         self.flow_tracker = FlowTracker()
 
         self.observer = NetworkObserver()
-        self.proxy = TransparentProxy()
+        self.proxy = TransparentProxy(enable_iptables=enable_iptables)
         self.extractor = FeatureExtractor(self.flow_tracker)
         self.ai_engine = AIEngine(self.db)
         self.decision_engine = DecisionEngine(self.db)
-        self.enforcer = EnforcementEngine()
+        self.enforcer = EnforcementEngine(enable_iptables=enable_iptables)
         self.dashboard = DashboardServer()
         self.dashboard.set_status_provider(self.get_stats)
         self.url_reputation = UrlReputationBridge()
@@ -175,6 +181,7 @@ class NetGuard:
         self.observer.stop()
         self.proxy.stop()
         self.enforcer.stop()
+        self.dashboard.stop()
 
         self.logger.info("✅ NetGuard stopped")
 

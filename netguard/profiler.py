@@ -6,9 +6,7 @@ Builds per-app baselines and detects deviations
 import logging
 import threading
 import time
-from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
-from collections import defaultdict
 
 from .database import ReputationDB
 
@@ -20,14 +18,14 @@ class AppProfile:
     package_name: str
     
     # Normal destinations
-    normal_ports: Set[int] = field(default_factory=set)
-    normal_domains: Set[str] = field(default_factory=set)
-    normal_ips: Set[str] = field(default_factory=set)
+    normal_ports: set[int] = field(default_factory=set)
+    normal_domains: set[str] = field(default_factory=set)
+    normal_ips: set[str] = field(default_factory=set)
     
     # Traffic patterns
     avg_bytes_per_session: float = 0.0
     avg_connections_per_hour: float = 0.0
-    typical_hours: Set[int] = field(default_factory=set)
+    typical_hours: set[int] = field(default_factory=set)
     
     # Risk tracking
     total_connections: int = 0
@@ -37,9 +35,9 @@ class AppProfile:
     # Timestamps
     first_seen: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
-    last_suspicious: Optional[float] = None
+    last_suspicious: float | None = None
     
-    def update_baseline(self, conn: Dict, verdict: Dict):
+    def update_baseline(self, conn: dict, verdict: dict):
         """Update profile with new connection data"""
         self.total_connections += 1
         self.last_seen = time.time()
@@ -140,7 +138,7 @@ class AppProfiler:
     def __init__(self, db: ReputationDB = None):
         self.logger = logging.getLogger("PROFILER")
         self.db = db
-        self._profiles: Dict[int, AppProfile] = {}
+        self._profiles: dict[int, AppProfile] = {}
         self._lock = threading.RLock()
     
     def get_or_create_profile(self, uid: str, package_name: str = None) -> AppProfile:
@@ -153,7 +151,7 @@ class AppProfiler:
                 )
             return self._profiles[uid]
     
-    def update_profile(self, uid: str, conn: Dict, verdict: Dict, package_name: str = None):
+    def update_profile(self, uid: str, conn: dict, verdict: dict, package_name: str = None):
         """Update app profile with connection result"""
         with self._lock:
             profile = self.get_or_create_profile(uid, package_name)
@@ -168,7 +166,7 @@ class AppProfiler:
                 action=verdict.get("action", "ALLOW")
             )
     
-    def get_behavioral_risk_adjustment(self, uid: str, conn: Dict) -> float:
+    def get_behavioral_risk_adjustment(self, uid: str, conn: dict) -> float:
         """
         Calculate risk adjustment based on behavioral deviation.
         
@@ -233,7 +231,7 @@ class AppProfiler:
             return self.db.is_user_blocked(uid)
         return False
     
-    def get_profile_summary(self, uid: str) -> Dict:
+    def get_profile_summary(self, uid: str) -> dict:
         """Get summary of app profile"""
         if uid not in self._profiles:
             return {"status": "no_profile"}
@@ -252,11 +250,11 @@ class AppProfiler:
             "active_hours": len(profile.typical_hours),
         }
     
-    def get_all_profiles(self) -> List[Dict]:
+    def get_all_profiles(self) -> list[dict]:
         """Get summaries of all profiles"""
         return [self.get_profile_summary(uid) for uid in self._profiles]
     
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get profiler statistics"""
         return {
             "tracked_apps": len(self._profiles),

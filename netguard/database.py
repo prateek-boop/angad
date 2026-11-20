@@ -7,14 +7,13 @@ device relayed through the proxy (or the local socket owner reported by
 the observer). It has no relation to Android app UIDs.
 """
 
-from contextlib import contextmanager
-
 import json
 import logging
 import math
 import sqlite3
 import time
-from typing import Dict, List, Optional
+from contextlib import contextmanager
+
 
 class ReputationDB:
     """
@@ -139,7 +138,9 @@ class ReputationDB:
             
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_conn_uid ON connection_history(uid)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_history(timestamp)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_history(timestamp)"
+            )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_normal_sample_schema "
                 "ON normal_traffic_samples(feature_schema)"
@@ -149,7 +150,7 @@ class ReputationDB:
     
     # === APP REPUTATION ===
     
-    def get_app_reputation(self, uid: str) -> Optional[Dict]:
+    def get_app_reputation(self, uid: str) -> dict | None:
         """Get reputation data for an app"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -186,7 +187,9 @@ class ReputationDB:
             else:
                 # New app
                 cursor.execute("""
-                    INSERT INTO app_reputation (uid, package_name, risk_score_avg, total_connections, last_seen, first_seen)
+                    INSERT INTO app_reputation (
+                        uid, package_name, risk_score_avg, total_connections, last_seen, first_seen
+                    )
                     VALUES (?, ?, ?, 1, ?, ?)
                 """, (uid, package_name, risk_score, now, now))
     
@@ -309,11 +312,14 @@ class ReputationDB:
                 """, (new_avg, new_std, value, value, n, now, uid, feature_name))
             else:
                 cursor.execute("""
-                    INSERT INTO app_baselines (uid, feature_name, avg_value, std_value, min_value, max_value, sample_count, updated_at)
+                    INSERT INTO app_baselines (
+                        uid, feature_name, avg_value, std_value, min_value, max_value,
+                        sample_count, updated_at
+                    )
                     VALUES (?, ?, ?, 0, ?, ?, 1, ?)
                 """, (uid, feature_name, value, value, value, now))
     
-    def get_baseline(self, uid: str, feature_name: str) -> Optional[Dict]:
+    def get_baseline(self, uid: str, feature_name: str) -> dict | None:
         """Get baseline stats for a feature"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -386,7 +392,9 @@ class ReputationDB:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO connection_history (uid, dst_ip, dst_port, sni, risk_score, action, classification)
+                INSERT INTO connection_history (
+                    uid, dst_ip, dst_port, sni, risk_score, action, classification
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (uid, dst_ip, dst_port, sni, risk_score, action, classification))
             
@@ -397,7 +405,7 @@ class ReputationDB:
                 )
             """)
     
-    def get_recent_connections(self, uid: str = None, limit: int = 100) -> List[Dict]:
+    def get_recent_connections(self, uid: str = None, limit: int = 100) -> list[dict]:
         """Get recent connections, optionally filtered by UID"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -418,7 +426,8 @@ class ReputationDB:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT 1 FROM blocked_ips WHERE ip = ? AND (expires_at IS NULL OR expires_at > strftime('%s', 'now'))
+                SELECT 1 FROM blocked_ips
+                WHERE ip = ? AND (expires_at IS NULL OR expires_at > strftime('%s', 'now'))
             """, (ip,))
             return cursor.fetchone() is not None
     
@@ -430,17 +439,33 @@ class ReputationDB:
             cursor.execute("""
                 INSERT OR REPLACE INTO blocked_ips (ip, reason, expires_at) VALUES (?, ?, ?)
             """, (ip, reason, expires))
-    
+
+    def block_domain(self, domain: str, reason: str, duration_hours: int = None):
+        """Add domain to blocklist"""
+        expires = int(time.time()) + (duration_hours * 3600) if duration_hours else None
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO blocked_domains (domain, reason, expires_at) VALUES (?, ?, ?)
+            """, (domain.lower().strip(), reason, expires))
+
+    def unblock_domain(self, domain: str):
+        """Remove domain from blocklist"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM blocked_domains WHERE domain = ?", (domain.lower().strip(),))
+
     def is_domain_blocked(self, domain: str) -> bool:
         """Check if domain is in blocklist"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT 1 FROM blocked_domains WHERE domain = ? AND (expires_at IS NULL OR expires_at > strftime('%s', 'now'))
+                SELECT 1 FROM blocked_domains
+                WHERE domain = ? AND (expires_at IS NULL OR expires_at > strftime('%s', 'now'))
             """, (domain,))
             return cursor.fetchone() is not None
     
-    def check_ja3_threat(self, ja3_hash: str) -> Optional[str]:
+    def check_ja3_threat(self, ja3_hash: str) -> str | None:
         """Check if JA3 hash matches known malware"""
         with self._get_connection() as conn:
             cursor = conn.cursor()

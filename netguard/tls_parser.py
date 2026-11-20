@@ -4,9 +4,8 @@ Real SNI extraction and JA3/JA4 fingerprint generation
 """
 
 import hashlib
-import struct
 import logging
-from typing import Optional, Dict, List, Tuple
+import struct
 from dataclasses import dataclass
 
 # TLS Constants
@@ -28,11 +27,11 @@ GREASE_VALUES = {
 class TLSClientHello:
     """Parsed TLS ClientHello data"""
     tls_version: str
-    cipher_suites: List[int]
-    extensions: List[int]
-    elliptic_curves: List[int]
-    ec_point_formats: List[int]
-    sni: Optional[str]
+    cipher_suites: list[int]
+    extensions: list[int]
+    elliptic_curves: list[int]
+    ec_point_formats: list[int]
+    sni: str | None
     ja3_hash: str
     ja3_string: str
 
@@ -51,7 +50,7 @@ class TLSParser:
     def __init__(self):
         self.logger = logging.getLogger("TLS_PARSER")
     
-    def parse_client_hello(self, data: bytes) -> Optional[TLSClientHello]:
+    def parse_client_hello(self, data: bytes) -> TLSClientHello | None:
         """
         Parse a TLS ClientHello message and extract all relevant fields.
         
@@ -67,7 +66,7 @@ class TLSParser:
             self.logger.debug(f"TLS parse error: {e}")
             return None
     
-    def _parse_client_hello_impl(self, data: bytes) -> Optional[TLSClientHello]:
+    def _parse_client_hello_impl(self, data: bytes) -> TLSClientHello | None:
         """Internal implementation of ClientHello parsing"""
         if len(data) < 5:
             return None
@@ -78,7 +77,6 @@ class TLSParser:
         if content_type != TLS_RECORD_HANDSHAKE:
             return None
         
-        record_version = struct.unpack("!H", data[1:3])[0]
         record_length = struct.unpack("!H", data[3:5])[0]
         
         if len(data) < 5 + record_length:
@@ -215,7 +213,7 @@ class TLSParser:
             ja3_string=ja3_string
         )
     
-    def _parse_sni_extension(self, data: bytes) -> Optional[str]:
+    def _parse_sni_extension(self, data: bytes) -> str | None:
         """Extract hostname from SNI extension"""
         try:
             if len(data) < 5:
@@ -238,10 +236,10 @@ class TLSParser:
                 return hostname.lower().rstrip('.')
             
             return None
-        except:
+        except Exception:
             return None
     
-    def _parse_supported_versions(self, data: bytes) -> List[int]:
+    def _parse_supported_versions(self, data: bytes) -> list[int]:
         """Parse supported_versions extension"""
         versions = []
         try:
@@ -255,11 +253,11 @@ class TLSParser:
                     v = struct.unpack("!H", data[i:i+2])[0]
                     if v not in GREASE_VALUES:
                         versions.append(v)
-        except:
+        except Exception:
             pass
         return versions
     
-    def _parse_elliptic_curves(self, data: bytes) -> List[int]:
+    def _parse_elliptic_curves(self, data: bytes) -> list[int]:
         """Parse supported_groups (elliptic_curves) extension"""
         curves = []
         try:
@@ -272,11 +270,11 @@ class TLSParser:
                     c = struct.unpack("!H", data[i:i+2])[0]
                     if c not in GREASE_VALUES:
                         curves.append(c)
-        except:
+        except Exception:
             pass
         return curves
     
-    def _parse_ec_point_formats(self, data: bytes) -> List[int]:
+    def _parse_ec_point_formats(self, data: bytes) -> list[int]:
         """Parse ec_point_formats extension"""
         formats = []
         try:
@@ -286,13 +284,13 @@ class TLSParser:
             fmt_len = data[0]
             for i in range(1, min(1 + fmt_len, len(data))):
                 formats.append(data[i])
-        except:
+        except Exception:
             pass
         return formats
     
-    def _compute_ja3_string(self, version: int, ciphers: List[int], 
-                           extensions: List[int], curves: List[int],
-                           formats: List[int]) -> str:
+    def _compute_ja3_string(self, version: int, ciphers: list[int], 
+                           extensions: list[int], curves: list[int],
+                           formats: list[int]) -> str:
         """
         Compute JA3 fingerprint string.
         Format: SSLVersion,Ciphers,Extensions,EllipticCurves,ECPointFormats
@@ -316,7 +314,7 @@ class TLSParser:
         }
         return versions.get(version, f"Unknown (0x{version:04x})")
     
-    def quick_extract_sni(self, data: bytes) -> Optional[str]:
+    def quick_extract_sni(self, data: bytes) -> str | None:
         """
         Quick extraction of just SNI without full parsing.
         More efficient for high-throughput scenarios.
@@ -324,12 +322,12 @@ class TLSParser:
         hello = self.parse_client_hello(data)
         return hello.sni if hello else None
     
-    def get_ja3_from_hello(self, data: bytes) -> Optional[str]:
+    def get_ja3_from_hello(self, data: bytes) -> str | None:
         """Extract just JA3 hash from ClientHello"""
         result = self.parse_client_hello(data)
         return result.ja3_hash if result else None
     
-    def to_dict(self, hello: TLSClientHello) -> Dict:
+    def to_dict(self, hello: TLSClientHello) -> dict:
         """Convert TLSClientHello to dictionary"""
         return {
             "tls_version": hello.tls_version,

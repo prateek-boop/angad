@@ -7,8 +7,8 @@ under its own privileges (root, or CAP_NET_ADMIN) and calls iptables
 directly.
 """
 
-import logging
 import ipaddress
+import logging
 import threading
 import time
 
@@ -37,8 +37,9 @@ class EnforcementEngine:
     # Chain name for our rules
     CHAIN_NAME = "NETGUARD"
 
-    def __init__(self):
+    def __init__(self, enable_iptables: bool = True):
         self.logger = logging.getLogger("ENFORCER")
+        self.enable_iptables = enable_iptables
 
         # Track active blocks
         self._blocked_ips: dict[str, float] = {}       # ip -> expiry timestamp
@@ -52,6 +53,11 @@ class EnforcementEngine:
         Initialize iptables chains for NetGuard.
         Must be called before any blocking operations.
         """
+        if not self.enable_iptables:
+            self.logger.info("ℹ️ Enforcement running in userspace/VPN mode (iptables bypassed)")
+            self.is_initialized = True
+            return True
+
         self.logger.info("🛠️ Initializing Enforcement Engine (iptables)...")
 
         success = self._init_iptables()
@@ -132,6 +138,8 @@ class EnforcementEngine:
 
     def _iptables_block_ip(self, ip: str) -> bool:
         """Block destination IP using iptables"""
+        if not self.enable_iptables:
+            return True
         runner = self._runner_for_ip(ip)
         code, _, _ = runner(["-C", self.CHAIN_NAME, "-d", ip, "-j", "DROP"])
         if code == 0:
@@ -176,6 +184,8 @@ class EnforcementEngine:
 
     def _iptables_block_client(self, client_ip: str) -> bool:
         """Block a client's traffic by source IP"""
+        if not self.enable_iptables:
+            return True
         runner = self._runner_for_ip(client_ip)
         code, _, _ = runner(["-C", self.CHAIN_NAME, "-s", client_ip, "-j", "DROP"])
         if code == 0:
@@ -292,6 +302,13 @@ class EnforcementEngine:
 
     def stop(self):
         """Detach and remove all firewall state owned by the enforcer."""
+        if not self.enable_iptables:
+            with self._lock:
+                self._blocked_ips.clear()
+                self._blocked_clients.clear()
+                self.is_initialized = False
+            return
+
         for runner in (run_iptables, run_ip6tables):
             for _ in range(32):
                 code, _, _ = runner(["-C", "OUTPUT", "-j", self.CHAIN_NAME])

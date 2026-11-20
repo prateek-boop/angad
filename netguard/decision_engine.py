@@ -6,13 +6,10 @@ Fuses AI verdicts with behavioral baselines for final decision
 import logging
 import threading
 import time
-from typing import Dict, Tuple, Optional
 
-from .profiler import AppProfiler
+from .constants import INSTANT_BLOCK_THRESHOLD, SAFE_THRESHOLD, STRIKE_LIMIT, WARN_THRESHOLD
 from .database import ReputationDB
-from .constants import (
-    INSTANT_BLOCK_THRESHOLD, WARN_THRESHOLD, SAFE_THRESHOLD, STRIKE_LIMIT
-)
+from .profiler import AppProfiler
 
 
 class DecisionEngine:
@@ -44,15 +41,15 @@ class DecisionEngine:
         self.strike_limit = STRIKE_LIMIT                         # 5
         
         # In-memory strike tracking (also persisted to DB)
-        self._strikes: Dict[int, int] = {}
+        self._strikes: dict[int, int] = {}
         self._last_decay: float = time.time()
         self._strike_lock = threading.RLock()
         
         self.logger.info("⚖️ Decision Engine initialized")
     
-    def evaluate_verdict(self, uid: str, verdict: Dict, 
-                        conn: Optional[Dict] = None,
-                        package_name: str = None) -> Tuple[str, str]:
+    def evaluate_verdict(self, uid: str, verdict: dict, 
+                        conn: dict | None = None,
+                        package_name: str = None) -> tuple[str, str]:
         """
         Evaluate AI verdict and make final decision.
         
@@ -71,7 +68,6 @@ class DecisionEngine:
         # Get base values
         risk_score = verdict.get("risk_score", 0)
         classification = verdict.get("classification", "UNKNOWN")
-        confidence = verdict.get("confidence", 0.5)
         
         # === USER OVERRIDES (highest priority) ===
         
@@ -155,13 +151,17 @@ class DecisionEngine:
             elif current_strikes >= self.strike_limit:
                 # Too many warnings, upgrade to block
                 action = "BLOCK"
-                reason = f"Strike limit reached ({current_strikes}/{self.strike_limit}): {classification}"
+                reason = (
+                    f"Strike limit reached ({current_strikes}/{self.strike_limit}): {classification}"
+                )
                 self.logger.warning(f"⛔ STRIKE BLOCK: UID {uid} - {reason}")
             else:
                 action = "WARN"
                 new_strikes = self._add_strike(uid)
                 reason = f"Suspicious ({classification}): Strike {new_strikes}/{self.strike_limit}"
-                self.logger.warning(f"⚠️ WARNING {new_strikes}/{self.strike_limit}: UID {uid} - {classification}")
+                self.logger.warning(
+                    f"⚠️ WARNING {new_strikes}/{self.strike_limit}: UID {uid} - {classification}"
+                )
         
         # 4. Moderate risk - allow with monitoring
         else:
@@ -206,7 +206,7 @@ class DecisionEngine:
         
         return action, reason
     
-    def _signal_sources(self, verdict: Dict) -> set:
+    def _signal_sources(self, verdict: dict) -> set:
         """
         Count independent evidence sources behind a verdict.
 
@@ -253,7 +253,7 @@ class DecisionEngine:
         return sources
 
     @staticmethod
-    def _has_deterministic_evidence(verdict: Dict) -> bool:
+    def _has_deterministic_evidence(verdict: dict) -> bool:
         reasons = verdict.get("reasons", [])
         return any(
             reason.startswith(("ja3_match:", "ja3_db_match:", "shieldnet_verified_"))
@@ -326,7 +326,7 @@ class DecisionEngine:
             self.db.set_user_block(uid, blocked)
         self.logger.info(f"👤 User {'blocked' if blocked else 'unblocked'} UID {uid}")
     
-    def get_app_status(self, uid: str) -> Dict:
+    def get_app_status(self, uid: str) -> dict:
         """Get complete status for an app"""
         profile = self.profiler.get_profile_summary(uid)
         
@@ -339,7 +339,7 @@ class DecisionEngine:
             "trust_score": self.profiler.get_trust_score(uid),
         }
     
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get decision engine statistics"""
         return {
             "apps_with_strikes": len(self._strikes),

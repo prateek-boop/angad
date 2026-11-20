@@ -40,11 +40,16 @@ class TransparentProxy:
     MAX_TLS_RECORD_SIZE = 65540
 
     def __init__(
-        self, host: str = '127.0.0.1', port: int = PROXY_PORT, host_v6: str = '::1'
+        self,
+        host: str = '127.0.0.1',
+        port: int = PROXY_PORT,
+        host_v6: str = '::1',
+        enable_iptables: bool = True,
     ):
         self.host = host
         self.host_v6 = host_v6
         self.port = port
+        self.enable_iptables = enable_iptables
         self.logger = logging.getLogger("PROXY")
         self.tls_parser = TLSParser()
 
@@ -75,7 +80,7 @@ class TransparentProxy:
         try:
             self.server_sock = self._create_listener(socket.AF_INET, self.host)
             self.server_sock_v6 = self._create_listener(socket.AF_INET6, self.host_v6)
-            if not self._setup_iptables():
+            if self.enable_iptables and not self._setup_iptables():
                 self._close_listeners()
                 return False
 
@@ -442,7 +447,8 @@ class TransparentProxy:
         """Stop the proxy server"""
         self.is_running = False
 
-        self._teardown_iptables()
+        if self.enable_iptables:
+            self._teardown_iptables()
 
         self._close_listeners()
 

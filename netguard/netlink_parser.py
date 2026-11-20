@@ -3,10 +3,9 @@ NetGuard - Netlink INET_DIAG Parser
 Real parsing of Linux kernel socket notifications
 """
 
-import struct
-import socket
 import logging
-from typing import List, Dict, Optional, Tuple
+import socket
+import struct
 from dataclasses import dataclass
 
 # Netlink message types
@@ -46,7 +45,7 @@ class NetlinkSocket:
     inode: int
     protocol: str        # "TCP" or "UDP"
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "src_ip": self.src_ip,
             "dst_ip": self.dst_ip,
@@ -70,7 +69,7 @@ class NetlinkParser:
     def __init__(self):
         self.logger = logging.getLogger("NETLINK_PARSER")
     
-    def parse_inet_diag_msg(self, data: bytes) -> Optional[NetlinkSocket]:
+    def parse_inet_diag_msg(self, data: bytes) -> NetlinkSocket | None:
         """
         Parse a single inet_diag_msg structure.
         
@@ -138,7 +137,7 @@ class NetlinkParser:
             self.logger.debug(f"Parse error: {e}")
             return None
     
-    def parse_netlink_response(self, data: bytes) -> List[NetlinkSocket]:
+    def parse_netlink_response(self, data: bytes) -> list[NetlinkSocket]:
         """
         Parse a complete Netlink response containing multiple messages.
         
@@ -230,13 +229,13 @@ class NetlinkParser:
         return header + payload
 
 
-def parse_ss_output(output: str) -> List[Dict]:
+def parse_ss_output(output: str) -> list[dict]:
     """
     Parse output from 'ss -ntup' command as fallback.
     
     Example output:
-    Netid  State   Recv-Q  Send-Q  Local Address:Port  Peer Address:Port  Process
-    tcp    ESTAB   0       0       192.168.1.5:52431   142.250.80.46:443  users:(("chrome",pid=1234,fd=45))
+    Netid  State   Recv-Q  Send-Q  Local Address:Port  Peer Address:Port
+    tcp    ESTAB   0       0       192.168.1.5:52431   142.250.80.46:443
     """
     sockets = []
     lines = output.strip().split('\n')
@@ -277,7 +276,7 @@ def parse_ss_output(output: str) -> List[Dict]:
                 "tx_bytes": 0,
                 "rx_bytes": 0,
             })
-        except (ValueError, IndexError) as e:
+        except (ValueError, IndexError):
             continue
     
     return sockets
