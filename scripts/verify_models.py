@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 
 import config
 from ml_engine.model import ThreatDetectionModel
@@ -11,7 +12,12 @@ from netguard.ai_engine import AIEngine
 
 
 def main() -> None:
-    url_model = ThreatDetectionModel.load(config.MODEL_PATH)
+    if config.MODEL_BACKEND == "onnx" and os.path.exists(config.ONNX_MODEL_PATH):
+        from ml_engine.onnx_model import ONNXThreatDetectionModel
+
+        url_model = ONNXThreatDetectionModel.load()
+    else:
+        url_model = ThreatDetectionModel.load(config.MODEL_PATH)
     url_model.warmup()
 
     engine = AIEngine()

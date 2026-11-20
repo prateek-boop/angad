@@ -14,9 +14,19 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
-# raw training datasets (large, not source code — see BRAIN.md for how to regenerate)
-data/
+# raw training datasets & runtime sqlite databases
+data/*.sqlite3
+data/*.cache
+data/*.csv
+data/*.parquet
 
+# Keep reference stores and configurations in data/
+!data/visual_reference_store.json
+
+# Explicitly ensure models and android assets are tracked
+!*.onnx
+!ml_engine/saved_model/onnx/
+!android/src/main/assets/
 
 # OS cruft
 .DS_Store

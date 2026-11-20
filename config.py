@@ -53,7 +53,17 @@ TRAIN_CONFIG = {
     "early_stopping_patience": 5,
 }
 
-MODEL_PATH = os.path.join(SAVED_MODEL_DIR, "shieldnet_model.keras")
+MODEL_BACKEND = os.getenv("SHIELDNET_MODEL_BACKEND", "onnx").strip().lower()
+ONNX_MODEL_DIR = os.path.join(SAVED_MODEL_DIR, "onnx")
+ONNX_MODEL_PATH = os.path.join(ONNX_MODEL_DIR, "model_quantized.onnx")
+ONNX_TOKENIZER_PATH = os.path.join(ONNX_MODEL_DIR, "tokenizer.json")
+
+# Primary model path points to the active ONNX model
+MODEL_PATH = (
+    ONNX_MODEL_PATH
+    if (MODEL_BACKEND == "onnx" and os.path.exists(ONNX_MODEL_PATH))
+    else os.path.join(SAVED_MODEL_DIR, "shieldnet_model.keras")
+)
 BEST_MODEL_PATH = os.path.join(SAVED_MODEL_DIR, "best_model.keras")
 LAST_CHECKPOINT_PATH = os.path.join(SAVED_MODEL_DIR, "last_checkpoint.keras")
 TRAINING_STATE_PATH = os.path.join(SAVED_MODEL_DIR, "training_state.json")

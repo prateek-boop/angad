@@ -85,7 +85,18 @@ class ScanOrchestrator:
         self.tokenizer = tokenizer or URLTokenizer()
         self.extractor = extractor or FeatureExtractor()
         self.explainer = explainer or ThreatExplainer()
-        self.model = model or ThreatDetectionModel.load(config.MODEL_PATH)
+        if model is not None:
+            self.model = model
+        elif (
+            config.MODEL_BACKEND == "onnx"
+            and os.path.exists(config.ONNX_MODEL_PATH)
+            and os.path.exists(config.ONNX_TOKENIZER_PATH)
+        ):
+            from ml_engine.onnx_model import ONNXThreatDetectionModel
+
+            self.model = ONNXThreatDetectionModel.load()
+        else:
+            self.model = ThreatDetectionModel.load(config.MODEL_PATH)
         self.calibrator = calibrator or TemperatureCalibrator.load(
             config.CALIBRATION_PATH
         )
@@ -187,7 +198,12 @@ class ScanOrchestrator:
         features = self.extractor.extract(value)
         url_ids = self.tokenizer.encode_batch([value])
         feature_array = np.asarray([features], dtype=np.float32)
-        raw = self.model.predict_with_confidence(url_ids, feature_array)[0]
+        try:
+            raw = self.model.predict_with_confidence(
+                url_ids, feature_array, urls=[value]
+            )[0]
+        except TypeError:
+            raw = self.model.predict_with_confidence(url_ids, feature_array)[0]
         calibrated_row = self.calibrator.transform(
             [[raw["probabilities"][name] for name in config.THREAT_CLASSES]]
         )[0]
@@ -257,6 +273,27 @@ class ScanOrchestrator:
                     }
                     if not redirects.get("blocked"):
                         final_url = redirects.get("final_url") or value
+                        if final_url != value:
+                            final_features = self.extractor.extract(final_url)
+                            final_url_ids = self.tokenizer.encode_batch([final_url])
+                            final_feature_array = np.asarray([final_features], dtype=np.float32)
+                            try:
+                                final_raw = self.model.predict_with_confidence(
+                                    final_url_ids, final_feature_array, urls=[final_url]
+                                )[0]
+                            except TypeError:
+                                final_raw = self.model.predict_with_confidence(
+                                    final_url_ids, final_feature_array
+                                )[0]
+                            final_calibrated_row = self.calibrator.transform(
+                                [[final_raw["probabilities"][name] for name in config.THREAT_CLASSES]]
+                            )[0]
+                            final_calibrated = self._probability_dict(final_calibrated_row)
+                            if final_calibrated["safe"] < calibrated["safe"]:
+                                calibrated = final_calibrated
+                                tier_results["tier2"][
+                                    "final_url_raw_probabilities"
+                                ] = final_raw["probabilities"]
                 except Exception as exc:
                     warnings.append(
                         f"Tier 2 redirect analysis unavailable: {type(exc).__name__}."
