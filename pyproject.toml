@@ -58,7 +58,7 @@ addopts = "--strict-markers"
 [tool.ruff]
 target-version = "py312"
 line-length = 105
-extend-exclude = ["dist", "build"]
+extend-exclude = ["dist", "build", "netguard"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
