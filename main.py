@@ -85,6 +85,7 @@ def cmd_netguard(args) -> None:
     guard = NetGuard(
         db_path=args.db_path or netguard_constants.DB_PATH,
         collect_normal=args.collect_normal,
+        enable_iptables=not getattr(args, "no_iptables", False),
     )
     guard.proxy.host = args.host
     guard.proxy.host_v6 = args.host_v6
@@ -290,6 +291,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--collect-normal",
         action="store_true",
         help="save low-risk allowed traffic as known-normal training samples",
+    )
+    netguard_parser.add_argument(
+        "--no-iptables",
+        action="store_true",
+        help="run in userspace mode without configuring system iptables",
     )
     netguard_parser.set_defaults(func=cmd_netguard)
 

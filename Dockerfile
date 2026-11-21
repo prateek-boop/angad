@@ -6,7 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     CUDA_VISIBLE_DEVICES=-1 \
     TF_CPP_MIN_LOG_LEVEL=2 \
-    HOME=/tmp/shieldnet-home
+    HOME=/tmp \
+    SHIELDNET_DATA_DIR=/app/data \
+    SHIELDNET_API_KEYS=shieldnet-dev-key
 
 WORKDIR /app
 COPY . /app
